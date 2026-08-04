@@ -1,0 +1,25 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+
+# Scraper output
+exports/
+Cleaned-Exports/
+!exports/.gitkeep
+!Cleaned-Exports/.gitkeep
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
