@@ -31,11 +31,49 @@ OUT_OUT_TIME = "Out Time"
 OUT_TICKET_SEQUENCE = "Ticket Sequence"
 OUT_ANALYTICS = "Invoice Lines/Analytics Distribution"
 OUT_PLATE_NUMBER = "Plate Number"
+OUT_LOCATION = "Location"
+OUT_REGION = "Region"
+OUT_SERVICE = "Service"
+OUT_SUB_SERVICE = "Sub Service"
 
 FIXED_PARTNER = "SKIDATA"
 FIXED_QUANTITY = 1
 FIXED_TAXES = "Sales Tax"
 FIXED_ANALYTICS = '{"paid parking":100}'
+
+# SKIDATA Car Park name -> Odoo Location / Region / Service / Sub Service
+CAR_PARK_MAPPING = {
+    "Westfield DAMMAM": {
+        "location": "02 - Nakheel Mall Dammam",
+        "region": "Dammam Region",
+        "service": "Paid Parking",
+        "sub_service": "Standard",
+    },
+    "View Mall": {
+        "location": "01 - The View Mall Riyadh",
+        "region": "Riyadh Region",
+        "service": "Paid Parking",
+        "sub_service": "Standard",
+    },
+    "Alnoor Mall": {
+        "location": "06 - Al Noor Mall Madinah",
+        "region": "Madinah Region",
+        "service": "Paid Parking",
+        "sub_service": "Standard",
+    },
+    "Mall of Arabia": {
+        "location": "03 - Arab Mall Jeddah",
+        "region": "Jeddah Region",
+        "service": "Paid Parking",
+        "sub_service": "Standard",
+    },
+    "Premium Carpark": {
+        "location": "06 - Al Noor Mall Madinah",
+        "region": "Madinah Region",
+        "service": "Paid Parking",
+        "sub_service": "Premium",
+    },
+}
 
 OUTPUT_COLUMNS = [
     OUT_PARTNER,
@@ -49,6 +87,10 @@ OUTPUT_COLUMNS = [
     OUT_TICKET_SEQUENCE,
     OUT_ANALYTICS,
     OUT_PLATE_NUMBER,
+    OUT_LOCATION,
+    OUT_REGION,
+    OUT_SERVICE,
+    OUT_SUB_SERVICE,
 ]
 
 
@@ -126,6 +168,20 @@ def _payment_is_nonzero(series: pd.Series) -> pd.Series:
     return numeric.notna() & (numeric != 0)
 
 
+def _map_car_park(car_park_value) -> dict:
+    """Map SKIDATA Car Park to Odoo Location / Region / Service / Sub Service."""
+    key = "" if car_park_value is None or (isinstance(car_park_value, float) and pd.isna(car_park_value)) else str(car_park_value).strip()
+    mapped = CAR_PARK_MAPPING.get(key)
+    if mapped is None:
+        return {
+            "location": "",
+            "region": "",
+            "service": "",
+            "sub_service": "",
+        }
+    return mapped
+
+
 def _write_odoo_excel(df: pd.DataFrame, dest_path: str) -> None:
     """Write workbook with Ticket Sequence forced as Excel text."""
     wb = Workbook()
@@ -189,9 +245,12 @@ def transform_parking_file(src_path: str, dest_path: str) -> tuple[int, int]:
     exit_plate_col = _find_column(
         df.columns, "Exit Plate Number", "Exit Plate", "ExitPlateNumber"
     )
+    car_park_col = _find_column(df.columns, "Car Park", "CarPark")
 
     filtered = df[_payment_is_nonzero(df[payment_col])].copy()
     rows_after = len(filtered)
+
+    location_maps = [_map_car_park(v) for v in filtered[car_park_col].values]
 
     out = pd.DataFrame(
         {
@@ -214,6 +273,10 @@ def transform_parking_file(src_path: str, dest_path: str) -> tuple[int, int]:
                     filtered[exit_plate_col].values,
                 )
             ],
+            OUT_LOCATION: [m["location"] for m in location_maps],
+            OUT_REGION: [m["region"] for m in location_maps],
+            OUT_SERVICE: [m["service"] for m in location_maps],
+            OUT_SUB_SERVICE: [m["sub_service"] for m in location_maps],
         }
     )
     out = out[OUTPUT_COLUMNS]
