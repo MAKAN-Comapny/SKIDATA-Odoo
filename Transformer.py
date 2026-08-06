@@ -9,8 +9,10 @@ Steps:
 """
 import os
 import glob
+import math
 import re
 from decimal import Decimal, InvalidOperation
+from typing import Optional
 
 import pandas as pd
 from openpyxl import Workbook
@@ -40,6 +42,10 @@ FIXED_PARTNER = "SKIDATA"
 FIXED_QUANTITY = 1
 FIXED_TAXES = "Sales Tax"
 FIXED_ANALYTICS = '{"paid parking":100}'
+
+VIEW_MALL_CAR_PARK = "View Mall"
+VIEW_MALL_PREMIUM_RATE = 15  # SAR per hour
+VIEW_MALL_PREMIUM_MIN_DURATION_MINUTES = 15
 
 # SKIDATA Car Park name -> Odoo Location / Region / Service / Sub Service
 CAR_PARK_MAPPING = {
@@ -182,6 +188,50 @@ def _map_car_park(car_park_value) -> dict:
     return mapped
 
 
+def _actual_duration_minutes(entry_time, exit_time) -> Optional[float]:
+    """Parking duration in minutes from Entry/Exit timestamps."""
+    entry = pd.to_datetime(entry_time, errors="coerce")
+    exit_ = pd.to_datetime(exit_time, errors="coerce")
+    if pd.isna(entry) or pd.isna(exit_):
+        return None
+    return (exit_ - entry).total_seconds() / 60.0
+
+
+def _paid_parking_hours(actual_duration_minutes: float) -> int:
+    """Power BI: ROUNDUP(ROUNDUP(Actual_Duration, 0) / 60, 0)."""
+    rounded_minutes = math.ceil(actual_duration_minutes)
+    return math.ceil(rounded_minutes / 60.0)
+
+
+def _is_view_mall_premium(car_park, entry_time, exit_time, payment) -> bool:
+    """
+    View Mall premium rule (Power BI):
+      Paid Parking Hours = ROUNDUP(ROUNDUP(Actual_Duration, 0) / 60, 0)
+      Premium = Actual_Duration > 15 AND Payment = Hours * 15 AND Payment <> 0
+    """
+    if str(car_park).strip() != VIEW_MALL_CAR_PARK:
+        return False
+
+    payment_num = pd.to_numeric(payment, errors="coerce")
+    if pd.isna(payment_num) or payment_num == 0:
+        return False
+
+    duration = _actual_duration_minutes(entry_time, exit_time)
+    if duration is None or duration <= VIEW_MALL_PREMIUM_MIN_DURATION_MINUTES:
+        return False
+
+    hours = _paid_parking_hours(duration)
+    expected_payment = hours * VIEW_MALL_PREMIUM_RATE
+    return float(payment_num) == float(expected_payment)
+
+
+def _resolve_sub_service(car_park, entry_time, exit_time, payment, mapped_sub_service: str) -> str:
+    """Override View Mall Sub Service to Premium when the rate rule matches."""
+    if _is_view_mall_premium(car_park, entry_time, exit_time, payment):
+        return "Premium"
+    return mapped_sub_service
+
+
 def _write_odoo_excel(df: pd.DataFrame, dest_path: str) -> None:
     """Write workbook with Ticket Sequence forced as Excel text."""
     wb = Workbook()
@@ -251,6 +301,10 @@ def transform_parking_file(src_path: str, dest_path: str) -> tuple[int, int]:
     rows_after = len(filtered)
 
     location_maps = [_map_car_park(v) for v in filtered[car_park_col].values]
+    car_parks = filtered[car_park_col].values
+    payments = filtered[payment_col].values
+    entry_times = filtered[entry_date_col].values
+    exit_times = filtered[exit_date_col].values
 
     out = pd.DataFrame(
         {
@@ -260,8 +314,8 @@ def transform_parking_file(src_path: str, dest_path: str) -> tuple[int, int]:
             OUT_QUANTITY: FIXED_QUANTITY,
             OUT_UNIT_PRICE: pd.to_numeric(filtered[payment_col], errors="coerce").values,
             OUT_TAXES: FIXED_TAXES,
-            OUT_IN_TIME: filtered[entry_date_col].values,
-            OUT_OUT_TIME: filtered[exit_date_col].values,
+            OUT_IN_TIME: entry_times,
+            OUT_OUT_TIME: exit_times,
             OUT_TICKET_SEQUENCE: [
                 _serial_as_text(v) for v in filtered[serial_col].values
             ],
@@ -276,7 +330,12 @@ def transform_parking_file(src_path: str, dest_path: str) -> tuple[int, int]:
             OUT_LOCATION: [m["location"] for m in location_maps],
             OUT_REGION: [m["region"] for m in location_maps],
             OUT_SERVICE: [m["service"] for m in location_maps],
-            OUT_SUB_SERVICE: [m["sub_service"] for m in location_maps],
+            OUT_SUB_SERVICE: [
+                _resolve_sub_service(cp, ent, ext, pay, m["sub_service"])
+                for cp, ent, ext, pay, m in zip(
+                    car_parks, entry_times, exit_times, payments, location_maps
+                )
+            ],
         }
     )
     out = out[OUTPUT_COLUMNS]
