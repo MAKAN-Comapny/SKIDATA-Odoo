@@ -1,9 +1,10 @@
 name: SKIDATA-Odoo Parking Pipeline
 
 on:
-  schedule:
-    # Daily at 03:00 UTC (06:00 AST / Saudi)
-    - cron: "0 3 * * *"
+  # Disabled: using external cron-job.org instead. Uncomment to re-enable GitHub schedule.
+  # schedule:
+  #   # Daily at 03:00 UTC (06:00 AST / Saudi)
+  #   - cron: "0 3 * * *"
   workflow_dispatch:
     # Manual run from GitHub Actions tab
   repository_dispatch:
