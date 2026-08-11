@@ -25,12 +25,13 @@ PARKING_FILE_MARKER = "Parking-Transactions"
 OUT_PARTNER = "Partner"
 OUT_INVOICE_BILL_DATE = "Invoice/Bill Date"
 OUT_INVOICE_LABEL = "Invoice Lines/Label"
-OUT_QUANTITY = "Quantity"
+OUT_QUANTITY = "Invoice Lines/Quantity"
 OUT_UNIT_PRICE = "Invoice Lines/Unit Price"
 OUT_TAXES = "invoice Lines/Taxes"
 OUT_IN_TIME = "In Time"
 OUT_OUT_TIME = "Out Time"
 OUT_TICKET_SEQUENCE = "Ticket Sequence"
+OUT_PAYMENT_REFERENCE = "Payment Reference"
 OUT_ANALYTICS = "Invoice Lines/Analytics Distribution"
 OUT_PLATE_NUMBER = "Plate Number"
 OUT_LOCATION = "Location"
@@ -40,8 +41,8 @@ OUT_SUB_SERVICE = "Sub Service"
 
 FIXED_PARTNER = "SKIDATA"
 FIXED_QUANTITY = 1
-FIXED_TAXES = "Sales Tax"
-FIXED_ANALYTICS = '{"paid parking":100}'
+FIXED_TAXES = "15%"
+ANALYTICS_DISTRIBUTION_PERCENT = 100
 
 VIEW_MALL_CAR_PARK = "View Mall"
 VIEW_MALL_PREMIUM_RATE = 15  # SAR per hour
@@ -81,6 +82,30 @@ CAR_PARK_MAPPING = {
     },
 }
 
+LOCATION_ANALYTIC_IDS = {
+    "06 - Al Noor Mall Madinah": 54,
+    "03 - Arab Mall Jeddah": 46,
+    "02 - Nakheel Mall Dammam": 43,
+    "01 - The View Mall Riyadh": 42,
+}
+
+REGION_ANALYTIC_IDS = {
+    "Dammam Region": 111,
+    "Jeddah Region": 112,
+    "Madinah Region": 115,
+    "Riyadh Region": 110,
+}
+
+SERVICE_ANALYTIC_IDS = {
+    "Paid Parking": 135,
+    "Valet Parking": 121,
+}
+
+SUB_SERVICE_ANALYTIC_IDS = {
+    "Premium": 131,
+    "Standard": 130,
+}
+
 OUTPUT_COLUMNS = [
     OUT_PARTNER,
     OUT_INVOICE_BILL_DATE,
@@ -91,6 +116,7 @@ OUTPUT_COLUMNS = [
     OUT_IN_TIME,
     OUT_OUT_TIME,
     OUT_TICKET_SEQUENCE,
+    OUT_PAYMENT_REFERENCE,
     OUT_ANALYTICS,
     OUT_PLATE_NUMBER,
     OUT_LOCATION,
@@ -232,6 +258,36 @@ def _resolve_sub_service(car_park, entry_time, exit_time, payment, mapped_sub_se
     return mapped_sub_service
 
 
+def _build_analytics_distribution(
+    location: str, region: str, service: str, sub_service: str
+) -> str:
+    """
+    Build Odoo analytics JSON: {"location_id":100, "region_id":100, ...}
+    Example: {"54":100, "115":100, "135":100, "131":100}
+    """
+    ids = []
+    for value, lookup in (
+        (location, LOCATION_ANALYTIC_IDS),
+        (region, REGION_ANALYTIC_IDS),
+        (service, SERVICE_ANALYTIC_IDS),
+        (sub_service, SUB_SERVICE_ANALYTIC_IDS),
+    ):
+        analytic_id = lookup.get(str(value).strip()) if value else None
+        if analytic_id is not None:
+            ids.append(analytic_id)
+
+    parts = [f'"{analytic_id}":{ANALYTICS_DISTRIBUTION_PERCENT}' for analytic_id in ids]
+    return "{" + ", ".join(parts) + "}"
+
+
+def _as_date_only(value):
+    """Convert timestamp to a date (no time component)."""
+    ts = pd.to_datetime(value, errors="coerce")
+    if pd.isna(ts):
+        return None
+    return ts.date()
+
+
 def _write_odoo_excel(df: pd.DataFrame, dest_path: str) -> None:
     """Write workbook with Ticket Sequence forced as Excel text."""
     wb = Workbook()
@@ -241,11 +297,13 @@ def _write_odoo_excel(df: pd.DataFrame, dest_path: str) -> None:
     headers = list(df.columns)
     ws.append(headers)
     ticket_col_idx = headers.index(OUT_TICKET_SEQUENCE) + 1  # 1-based
+    payment_ref_col_idx = headers.index(OUT_PAYMENT_REFERENCE) + 1
+    bill_date_col_idx = headers.index(OUT_INVOICE_BILL_DATE) + 1
 
     for row in df.itertuples(index=False, name=None):
         values = []
         for col_name, value in zip(headers, row):
-            if col_name == OUT_TICKET_SEQUENCE:
+            if col_name in (OUT_TICKET_SEQUENCE, OUT_PAYMENT_REFERENCE):
                 values.append(_serial_as_text(value))
             elif pd.isna(value):
                 values.append(None)
@@ -254,11 +312,15 @@ def _write_odoo_excel(df: pd.DataFrame, dest_path: str) -> None:
         ws.append(values)
 
     for row_idx in range(2, ws.max_row + 1):
-        cell = ws.cell(row=row_idx, column=ticket_col_idx)
-        if cell.value is None:
-            continue
-        cell.value = str(cell.value)
-        cell.number_format = "@"
+        for col_idx in (ticket_col_idx, payment_ref_col_idx):
+            text_cell = ws.cell(row=row_idx, column=col_idx)
+            if text_cell.value is not None:
+                text_cell.value = str(text_cell.value)
+                text_cell.number_format = "@"
+
+        date_cell = ws.cell(row=row_idx, column=bill_date_col_idx)
+        if date_cell.value is not None:
+            date_cell.number_format = "YYYY-MM-DD"
 
     os.makedirs(os.path.dirname(dest_path) or ".", exist_ok=True)
     wb.save(dest_path)
@@ -269,10 +331,11 @@ def transform_parking_file(src_path: str, dest_path: str) -> tuple[int, int]:
     Filter + remap one Parking Transactions workbook.
     Returns (rows_before_filter, rows_after_filter).
     """
-    # Resolve Serial Number column, then re-read it as text to preserve digits.
+    # Resolve text columns, then re-read them as text to preserve digits.
     header_df = pd.read_excel(src_path, nrows=0)
     serial_col = _find_column(header_df.columns, "Serial Number", "SerialNumber")
-    df = pd.read_excel(src_path, dtype={serial_col: str})
+    receipt_col = _find_column(header_df.columns, "Receipt Number", "ReceiptNumber")
+    df = pd.read_excel(src_path, dtype={serial_col: str, receipt_col: str})
     rows_before = len(df)
 
     payment_col = _find_column(df.columns, "Payment")
@@ -306,10 +369,26 @@ def transform_parking_file(src_path: str, dest_path: str) -> tuple[int, int]:
     entry_times = filtered[entry_date_col].values
     exit_times = filtered[exit_date_col].values
 
+    locations = [m["location"] for m in location_maps]
+    regions = [m["region"] for m in location_maps]
+    services = [m["service"] for m in location_maps]
+    sub_services = [
+        _resolve_sub_service(cp, ent, ext, pay, m["sub_service"])
+        for cp, ent, ext, pay, m in zip(
+            car_parks, entry_times, exit_times, payments, location_maps
+        )
+    ]
+    analytics = [
+        _build_analytics_distribution(loc, reg, svc, sub)
+        for loc, reg, svc, sub in zip(locations, regions, services, sub_services)
+    ]
+
     out = pd.DataFrame(
         {
             OUT_PARTNER: FIXED_PARTNER,
-            OUT_INVOICE_BILL_DATE: filtered[txn_date_col].values,
+            OUT_INVOICE_BILL_DATE: [
+                _as_date_only(v) for v in filtered[txn_date_col].values
+            ],
             OUT_INVOICE_LABEL: filtered[article_col].values,
             OUT_QUANTITY: FIXED_QUANTITY,
             OUT_UNIT_PRICE: pd.to_numeric(filtered[payment_col], errors="coerce").values,
@@ -319,7 +398,10 @@ def transform_parking_file(src_path: str, dest_path: str) -> tuple[int, int]:
             OUT_TICKET_SEQUENCE: [
                 _serial_as_text(v) for v in filtered[serial_col].values
             ],
-            OUT_ANALYTICS: FIXED_ANALYTICS,
+            OUT_PAYMENT_REFERENCE: [
+                _serial_as_text(v) for v in filtered[receipt_col].values
+            ],
+            OUT_ANALYTICS: analytics,
             OUT_PLATE_NUMBER: [
                 _pick_plate(e, x)
                 for e, x in zip(
@@ -327,15 +409,10 @@ def transform_parking_file(src_path: str, dest_path: str) -> tuple[int, int]:
                     filtered[exit_plate_col].values,
                 )
             ],
-            OUT_LOCATION: [m["location"] for m in location_maps],
-            OUT_REGION: [m["region"] for m in location_maps],
-            OUT_SERVICE: [m["service"] for m in location_maps],
-            OUT_SUB_SERVICE: [
-                _resolve_sub_service(cp, ent, ext, pay, m["sub_service"])
-                for cp, ent, ext, pay, m in zip(
-                    car_parks, entry_times, exit_times, payments, location_maps
-                )
-            ],
+            OUT_LOCATION: locations,
+            OUT_REGION: regions,
+            OUT_SERVICE: services,
+            OUT_SUB_SERVICE: sub_services,
         }
     )
     out = out[OUTPUT_COLUMNS]
