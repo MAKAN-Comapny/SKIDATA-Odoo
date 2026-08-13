@@ -1,0 +1,46 @@
+name: SKIDATA-Odoo SharePoint to Odoo Import
+
+on:
+  workflow_dispatch:
+    # Manual run from GitHub Actions tab
+  repository_dispatch:
+    # External cron (cron-job.org). Use a DIFFERENT event than the scraper.
+    types: [odoo-import]
+
+jobs:
+  import-to-odoo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install import dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r skidata-odoo-share/requirements.txt
+
+      - name: Import latest SharePoint file into Odoo drafts
+        working-directory: skidata-odoo-share
+        env:
+          TENANT_ID: ${{ secrets.TENANT_ID }}
+          CLIENT_ID: ${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+          SHAREPOINT_SITE_NAME: ${{ secrets.SHAREPOINT_SITE_NAME }}
+          TARGET_FOLDER_PATH: ${{ secrets.TARGET_FOLDER_PATH }}
+          ODOO_URL: ${{ secrets.ODOO_URL }}
+          ODOO_DB: ${{ secrets.ODOO_DB }}
+          ODOO_USERNAME: ${{ secrets.ODOO_USERNAME }}
+          ODOO_API_KEY: ${{ secrets.ODOO_API_KEY }}
+          ODOO_JOURNAL_ID: ${{ secrets.ODOO_JOURNAL_ID }}
+          ODOO_SALES_ACCOUNT_ID: ${{ secrets.ODOO_SALES_ACCOUNT_ID }}
+          ODOO_TAX_ID: ${{ secrets.ODOO_TAX_ID }}
+          ODOO_WALKIN_PARTNER_ID: ${{ secrets.ODOO_WALKIN_PARTNER_ID }}
+          IMPORT_LIMIT: ${{ secrets.IMPORT_LIMIT }}
+        run: python main_import.py

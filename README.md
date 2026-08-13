@@ -1,12 +1,13 @@
 # SKIDATA-Odoo
 
-Scrapes **only** the Parking Transactions report from SKIDATA analytics, transforms it for Odoo, and uploads to Microsoft SharePoint.
+Scrapes **only** the Parking Transactions report from SKIDATA analytics, transforms it for Odoo, uploads to Microsoft SharePoint, then (second job) creates **draft** Customer Invoices in Odoo.
 
 ## Pipeline
 
 1. **Scraper** – Logs into SKIDATA portal, downloads Parking Transactions (yesterday) to `exports/`
 2. **Transformer** – Keeps rows with `Payment != 0`, remaps columns to the Odoo invoice structure
 3. **SharePoint** – Uploads the transformed file to folder `SKIDATA - Odoo`
+4. **Odoo import** (`skidata-odoo-share/`) – Downloads the latest SharePoint file and creates **draft** invoices (not posted)
 
 ## Local Setup
 
@@ -23,15 +24,16 @@ python main.py
 
 Set `UPLOAD_TO_SHAREPOINT=false` in `.env` to skip upload while testing.
 
-## GitHub Actions (cron)
+## GitHub Actions
 
-The workflow runs:
+Two workflows, both triggered manually or by **separate** cron-job.org jobs:
 
-| Trigger | When |
-|---------|------|
-| **schedule** | Daily at **03:00 UTC** |
-| **workflow_dispatch** | Manual from Actions tab |
-| **repository_dispatch** | External cron (e.g. [cron-job.org](https://cron-job.org)) |
+| Workflow | Event type | What it does |
+|----------|------------|----------------|
+| **SKIDATA-Odoo Parking Pipeline** | `manual-trigger` | Scrape → transform → SharePoint |
+| **SKIDATA-Odoo SharePoint to Odoo Import** | `odoo-import` | Latest SharePoint file → Odoo **drafts** |
+
+Use **two cron jobs** (import later than scrape, e.g. +30–60 min). Do not reuse `manual-trigger` for import.
 
 ### One-time setup
 
@@ -62,18 +64,37 @@ This creates the GitHub repo, pushes the code, and sets secrets from `.env`.
 | CLIENT_SECRET | Yes |
 | SHAREPOINT_SITE_NAME | Yes |
 | TARGET_FOLDER_PATH | Yes (`SKIDATA - Odoo`) |
+| ODOO_URL | Yes (import job) |
+| ODOO_DB | Yes (import job) |
+| ODOO_USERNAME | Yes (import job) |
+| ODOO_API_KEY | Yes (import job) |
+| ODOO_JOURNAL_ID | Yes (import job) |
+| ODOO_SALES_ACCOUNT_ID | Yes (import job) |
+| ODOO_TAX_ID | Yes (import job) |
+| ODOO_WALKIN_PARTNER_ID | Yes (import job) |
 
-### External cron (optional)
+### External cron (cron-job.org)
 
-If GitHub schedule is delayed, call from cron-job.org:
+**Job 1 — scraper** (`event_type`: `manual-trigger`):
 
 ```http
-POST https://api.github.com/repos/OWNER/SKIDATA-Odoo/dispatches
+POST https://api.github.com/repos/MHamadaMk24/SKIDATA-Odoo/dispatches
 Authorization: Bearer YOUR_GITHUB_PAT
 Accept: application/vnd.github+json
 Content-Type: application/json
 
 {"event_type": "manual-trigger"}
+```
+
+**Job 2 — Odoo import** (`event_type`: `odoo-import`), later than job 1:
+
+```http
+POST https://api.github.com/repos/MHamadaMk24/SKIDATA-Odoo/dispatches
+Authorization: Bearer YOUR_GITHUB_PAT
+Accept: application/vnd.github+json
+Content-Type: application/json
+
+{"event_type": "odoo-import"}
 ```
 
 ## Environment
@@ -91,3 +112,14 @@ Content-Type: application/json
 | TARGET_FOLDER_PATH | No | Default: `SKIDATA - Odoo` |
 | UPLOAD_TO_SHAREPOINT | No | Default: `true` |
 | HEADLESS | No | `true` in CI; default `false` locally |
+| ODOO_* | Yes for import | See secrets table |
+| IMPORT_LIMIT | No | If set, import only N rows (testing) |
+
+### Local Odoo import
+
+```bash
+cd skidata-odoo-share
+pip install -r requirements.txt
+python dry_run.py 5
+python main_import.py
+```
