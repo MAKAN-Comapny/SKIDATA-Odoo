@@ -1,6 +1,6 @@
 """
 Import a batch of tickets from the pre-mapped Odoo-import-style file
-into Odoo as DRAFT invoices.
+into Odoo as customer invoices.
 
 Unit Price in the source file is the collected amount (10, 30, ...).
 It is sent to Odoo as-is (not VAT-excluded / net).
@@ -8,10 +8,12 @@ It is sent to Odoo as-is (not VAT-excluded / net).
 Usage:
   python import_csv_batch.py path/to/file.xlsx [limit]
   python import_csv_batch.py path/to/file.xlsx 3 --yes
+  python import_csv_batch.py path/to/file.xlsx 3 --post
+  python import_csv_batch.py path/to/file.xlsx 3 --post --pay --yes
 """
+import argparse
 import csv
 import json
-import sys
 from datetime import date, datetime
 
 import config
@@ -81,7 +83,9 @@ def build_payload(row):
                 {
                     "account_id": config.ODOO_SALES_ACCOUNT_ID,
                     "name": row["Invoice Lines/Label"],
-                    "quantity": float(row.get("Invoice Lines/Quantity", row.get("Quantity", 1))),
+                    "quantity": float(
+                        row.get("Invoice Lines/Quantity", row.get("Quantity", 1))
+                    ),
                     "price_unit": price_unit,
                     "tax_ids": [(6, 0, [config.ODOO_TAX_ID])],
                     "analytic_distribution": analytic,
@@ -92,11 +96,41 @@ def build_payload(row):
     return payload
 
 
-def main(csv_path, limit=10, auto_yes=False):
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("csv_path")
+    parser.add_argument("limit", nargs="?", type=int, default=10)
+    parser.add_argument("--yes", action="store_true", help="Skip confirmation prompt.")
+    parser.add_argument(
+        "--post", action="store_true", help="Validate (post) each created invoice."
+    )
+    parser.add_argument(
+        "--pay",
+        action="store_true",
+        help="Register full payment for each invoice (implies --post).",
+    )
+    return parser.parse_args()
+
+
+def main(csv_path, limit=10, auto_yes=False, post=False, pay=False):
+    payment_journal_id = None
+    if pay:
+        post = True
+        payment_journal_id = config.ODOO_PAYMENT_JOURNAL_ID
+        if not payment_journal_id:
+            raise RuntimeError(
+                "--pay requires ODOO_PAYMENT_JOURNAL_ID to be set "
+                "(the bank/cash journal these tickets settle through)."
+            )
+
     rows = load_rows(csv_path, limit)
+    action_desc = "POSTED + PAID" if pay else "POSTED" if post else "DRAFT"
     print(f"Loaded {len(rows)} row(s) from {csv_path} (limit={limit}).")
     print(f"Odoo: {config.ODOO_URL} / {config.ODOO_DB}")
-    print("Mode: DRAFT invoices only (no post).\n")
+    print(f"Mode: {action_desc}\n")
 
     for r in rows:
         print(
@@ -107,17 +141,19 @@ def main(csv_path, limit=10, auto_yes=False):
         )
 
     if not auto_yes:
-        confirm = input(f"\nCreate {len(rows)} DRAFT invoice(s) in Odoo now? [y/N] ")
+        confirm = input(f"\nCreate {len(rows)} {action_desc} invoice(s) in Odoo now? [y/N] ")
         if confirm.strip().lower() != "y":
             print("Aborted, nothing created.")
             return
     else:
-        print(f"\nAuto-confirm: creating {len(rows)} DRAFT invoice(s)...")
+        print(f"\nAuto-confirm: creating {len(rows)} {action_desc} invoice(s)...")
 
     ticket_payloads = [(str(r["Ticket Sequence"]), build_payload(r)) for r in rows]
 
     client = odoo_client.OdooClient()
-    results = client.process_batch(ticket_payloads)
+    results = client.process_batch(
+        ticket_payloads, post=post, pay=pay, payment_journal_id=payment_journal_id
+    )
 
     print("\n=== Results ===")
     print("Created:", results["created"])
@@ -126,8 +162,5 @@ def main(csv_path, limit=10, auto_yes=False):
 
 
 if __name__ == "__main__":
-    args = [a for a in sys.argv[1:] if a != "--yes"]
-    auto_yes = "--yes" in sys.argv[1:]
-    path = args[0]
-    limit = int(args[1]) if len(args) > 1 else 10
-    main(path, limit, auto_yes=auto_yes)
+    args = parse_args()
+    main(args.csv_path, args.limit, auto_yes=args.yes, post=args.post, pay=args.pay)

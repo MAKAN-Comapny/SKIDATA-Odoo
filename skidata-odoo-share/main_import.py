@@ -7,6 +7,7 @@ import os
 import sys
 
 import import_csv_batch
+import config
 import odoo_client
 import sharepoint_download
 
@@ -18,9 +19,25 @@ def _import_limit():
     return int(raw)
 
 
+def _env_flag(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in ("true", "1", "yes")
+
+
 def run():
+    post = _env_flag("ODOO_POST")
+    pay = _env_flag("ODOO_PAY")
+    payment_journal_id = None
+    if pay:
+        post = True
+        payment_journal_id = config.ODOO_PAYMENT_JOURNAL_ID
+        if not payment_journal_id:
+            raise RuntimeError(
+                "ODOO_PAY=true requires ODOO_PAYMENT_JOURNAL_ID to be set."
+            )
+
+    action_desc = "POSTED + PAID" if pay else "POSTED" if post else "DRAFT"
     print("=" * 64)
-    print("SKIDATA-Odoo import: SharePoint latest file -> Odoo drafts")
+    print(f"SKIDATA-Odoo import: SharePoint latest file -> Odoo ({action_desc})")
     print("=" * 64)
 
     dest_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "downloads")
@@ -38,7 +55,7 @@ def run():
     limit = _import_limit()
     rows = import_csv_batch.load_rows(local_path, limit)
     print(f"Rows   : {len(rows)}" + (f" (IMPORT_LIMIT={limit})" if limit else ""))
-    print("Mode   : DRAFT invoices only (no post)")
+    print(f"Mode   : {action_desc}")
 
     payloads = []
     build_failed = []
@@ -56,7 +73,9 @@ def run():
 
     print(f"Creating/checking {len(payloads)} invoice(s) in Odoo...")
     client = odoo_client.OdooClient()
-    results = client.process_batch(payloads)
+    results = client.process_batch(
+        payloads, post=post, pay=pay, payment_journal_id=payment_journal_id
+    )
 
     created = results["created"]
     skipped = results["skipped_duplicate"]
