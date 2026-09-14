@@ -30,20 +30,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Install Playwright browsers
-        run: playwright install --with-deps chromium
-
       - name: Run Parking Transactions pipeline
         env:
-          HEADLESS: "true"
           UPLOAD_TO_SHAREPOINT: "true"
-          SKIDATA_URL: ${{ secrets.SKIDATA_URL }}
-          SKIDATA_TENANT: ${{ secrets.SKIDATA_TENANT }}
-          SKIDATA_LOGIN: ${{ secrets.SKIDATA_LOGIN }}
-          SKIDATA_PASSWORD: ${{ secrets.SKIDATA_PASSWORD }}
           TENANT_ID: ${{ secrets.TENANT_ID }}
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
           SHAREPOINT_SITE_NAME: ${{ secrets.SHAREPOINT_SITE_NAME }}
+          # Raw daily Parking Transactions source folder
           TARGET_FOLDER_PATH: ${{ secrets.TARGET_FOLDER_PATH }}
+          # Transformed *-Odoo.xlsx destination (defaults to "SKIDATA - Odoo" if unset)
+          TARGET_FOLDER_PATH_ODOO: ${{ secrets.TARGET_FOLDER_PATH_ODOO }}
         run: python main.py

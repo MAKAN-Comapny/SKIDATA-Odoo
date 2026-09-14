@@ -1,6 +1,11 @@
 """
-Upload Parking Transactions files from Cleaned-Exports/ to Microsoft SharePoint.
-Run Transformer.py first to ensure Cleaned-Exports/ is populated.
+Upload transformed Parking Transactions (*-Odoo.xlsx) from Cleaned-Exports/
+to Microsoft SharePoint folder TARGET_FOLDER_PATH_ODOO (default: SKIDATA - Odoo).
+
+Run Transformer.py (or main.py) first so Cleaned-Exports/ is populated.
+
+Note: TARGET_FOLDER_PATH is the raw daily source folder (Skidata_Daily_Files).
+Do not upload Odoo files there — use TARGET_FOLDER_PATH_ODOO instead.
 """
 import os
 import re
@@ -14,12 +19,32 @@ TENANT_ID = os.getenv("TENANT_ID")
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 SITE_NAME = os.getenv("SHAREPOINT_SITE_NAME")
-TARGET_FOLDER_PATH = (os.getenv("TARGET_FOLDER_PATH") or "SKIDATA - Odoo").strip()
+# Destination for transformed *-Odoo.xlsx (NOT the raw daily folder).
+# TARGET_FOLDER_PATH points at Skidata_Daily_Files (raw source) — do not reuse it here.
+TARGET_FOLDER_PATH = (
+    os.getenv("TARGET_FOLDER_PATH_ODOO")
+    or os.getenv("ODOO_SHAREPOINT_FOLDER")
+    or "SKIDATA - Odoo"
+).strip()
 
 CLEANED_EXPORTS_DIR = "Cleaned-Exports"
 # Prefer transformed Odoo files; fall back to any Parking-Transactions workbook.
 ODOO_FILE_MARKER = "Parking-Transactions-Odoo"
 PARKING_FILE_MARKER = "Parking-Transactions"
+
+
+def encode_drive_path(path: str) -> str:
+    """URL-encode each folder/file segment for Graph drive paths."""
+    return "/".join(requests.utils.quote(part, safe="") for part in path.split("/") if part)
+
+
+def get_folder_item(site_id, headers, folder_path: str) -> dict:
+    """Resolve a folder by path; returns the drive item metadata."""
+    encoded = encode_drive_path(folder_path)
+    url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root:/{encoded}"
+    r = requests.get(url, headers=headers)
+    r.raise_for_status()
+    return r.json()
 
 
 def get_access_token():
@@ -69,15 +94,17 @@ def ensure_folder_path(site_id, headers):
 
     for part in parts:
         current = f"{current}/{part}" if current else part
+        encoded = encode_drive_path(current)
         check = requests.get(
-            f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root:/{current}",
+            f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root:/{encoded}",
             headers=headers,
         )
 
         if check.status_code == 404:
             parent = current.rsplit("/", 1)[0] if "/" in current else ""
+            encoded_parent = encode_drive_path(parent) if parent else ""
             create_url = (
-                f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root:/{parent}:/children"
+                f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root:/{encoded_parent}:/children"
                 if parent
                 else f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root/children"
             )
@@ -89,12 +116,16 @@ def ensure_folder_path(site_id, headers):
             requests.post(create_url, headers=headers, json=folder_payload)
 
 
-def upload_file(site_id, headers, file_path):
-    """Upload a single file to SharePoint."""
+def upload_file(site_id, headers, file_path, folder_path: str | None = None):
+    """Upload a single file to SharePoint under the target folder item id."""
+    folder_path = folder_path or TARGET_FOLDER_PATH
+    folder_item = get_folder_item(site_id, headers, folder_path)
+    folder_id = folder_item["id"]
     file_name = os.path.basename(file_path)
+    encoded_name = requests.utils.quote(file_name, safe="")
     upload_url = (
-        f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root:"
-        f"/{TARGET_FOLDER_PATH}/{file_name}:/content"
+        f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/items/{folder_id}:"
+        f"/{encoded_name}:/content"
     )
 
     with open(file_path, "rb") as f:

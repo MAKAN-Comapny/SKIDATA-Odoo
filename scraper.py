@@ -1,5 +1,10 @@
 """
-SKIDATA-Odoo scraper: download only the Parking Transactions report.
+SKIDATA portal scraper (UNUSED by main.py).
+
+Daily Parking Transactions are now taken from SharePoint folder
+Skidata_Daily_Files via sharepoint_parking_download.py.
+
+Kept only for manual/emergency portal downloads.
 """
 import asyncio
 import os

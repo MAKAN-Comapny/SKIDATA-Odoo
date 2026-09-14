@@ -2,30 +2,32 @@
 SKIDATA-Odoo Pipeline
 
 Orchestrates parking-transactions-only workflow:
-  1. Scraper  - Login to SKIDATA portal, download Parking Transactions to exports/
+  1. SharePoint download - Latest raw Parking Transactions from Skidata_Daily_Files
   2. Transformer - Filter Payment != 0 and remap columns for Odoo
-  3. To_Sharepoint - Upload transformed file to SharePoint folder "SKIDATA - Odoo"
+  3. To_Sharepoint - Upload transformed *-Odoo.xlsx to folder "SKIDATA - Odoo"
+
+The portal scraper is no longer used: daily raw reports are already uploaded
+to SharePoint by another job.
 
 Set UPLOAD_TO_SHAREPOINT=false in .env to skip step 3.
 """
-import asyncio
 import os
 import sys
 
 from dotenv import load_dotenv
 
-from scraper import login_and_open_portal
+from sharepoint_parking_download import fetch_latest_parking_to_exports
 from Transformer import run as transform_exports
 
 
 def main():
-    """Run scrape -> transform -> upload to SharePoint."""
+    """Run SharePoint download -> transform -> upload to SharePoint."""
     load_dotenv()
 
     print("=" * 60)
-    print("Step 1/3: Scraping Parking Transactions report...")
+    print("Step 1/3: Download Parking Transactions from SharePoint...")
     print("=" * 60)
-    asyncio.run(login_and_open_portal())
+    fetch_latest_parking_to_exports()
 
     print("\n" + "=" * 60)
     print("Step 2/3: Transforming for Odoo (Payment != 0 + column map)...")
@@ -37,7 +39,7 @@ def main():
         from To_Sharepoint import main as upload_to_sharepoint
 
         print("\n" + "=" * 60)
-        print("Step 3/3: Uploading to SharePoint (SKIDATA - Odoo)...")
+        print("Step 3/3: Uploading transformed file to SharePoint (SKIDATA - Odoo)...")
         print("=" * 60)
         upload_to_sharepoint()
     else:

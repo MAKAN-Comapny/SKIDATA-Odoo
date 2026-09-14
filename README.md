@@ -1,19 +1,24 @@
 # SKIDATA-Odoo
 
-Scrapes **only** the Parking Transactions report from SKIDATA analytics, transforms it for Odoo, uploads to Microsoft SharePoint, then (second job) creates **draft** Customer Invoices in Odoo.
+Downloads the latest **Parking Transactions** report from SharePoint
+(`Skidata_Daily_Files`), transforms it for Odoo, uploads the `*-Odoo.xlsx`
+file to Microsoft SharePoint (`SKIDATA - Odoo`), then (second job) creates
+Customer Invoices in Odoo.
+
+The portal scraper is **not** used in this pipeline — daily raw files are
+already placed in SharePoint by another job.
 
 ## Pipeline
 
-1. **Scraper** – Logs into SKIDATA portal, downloads Parking Transactions (yesterday) to `exports/`
-2. **Transformer** – Keeps rows with `Payment != 0`, remaps columns to the Odoo invoice structure
-3. **SharePoint** – Uploads the transformed file to folder `SKIDATA - Odoo`
-4. **Odoo import** (`skidata-odoo-share/`) – Downloads the latest SharePoint file and creates **draft** invoices (not posted)
+1. **SharePoint download** – Latest `*Parking-Transactions*.xlsx` from `Skidata_Daily_Files` → `exports/`
+2. **Transformer** – Keeps rows with `Payment != 0`, remaps columns to the Odoo invoice structure → `Cleaned-Exports/`
+3. **SharePoint upload** – Uploads the transformed `*-Odoo.xlsx` to folder `SKIDATA - Odoo`
+4. **Odoo import** (`skidata-odoo-share/`) – Downloads the latest SharePoint Odoo file and creates invoices
 
 ## Local Setup
 
 ```bash
 pip install -r requirements.txt
-playwright install chromium
 ```
 
 Copy `.env.example` to `.env` and fill in your credentials.
