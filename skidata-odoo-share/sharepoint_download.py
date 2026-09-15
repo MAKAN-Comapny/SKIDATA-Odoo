@@ -11,7 +11,8 @@ import requests
 
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 DEFAULT_FOLDER_CANDIDATES = ("SKIDATA - Odoo", "SKIDATA-Odoo")
-FILENAME_MARKERS = ("Parking-Transactions-Odoo", "Parking-Transactions")
+# Only transformed Odoo files — never raw Parking-Transactions.xlsx
+FILENAME_MARKERS = ("Parking-Transactions-Odoo",)
 
 
 def _env(name, default=None):
@@ -57,10 +58,29 @@ def get_site_id(headers):
 
 
 def folder_candidates():
-    configured = os.getenv("TARGET_FOLDER_PATH", "").strip()
+    """
+    Import must read from the Odoo upload folder only.
+    Prefer TARGET_FOLDER_PATH_ODOO; never treat Skidata_Daily_Files as source.
+    """
     folders = []
-    if configured:
-        folders.append(configured)
+    for key in ("TARGET_FOLDER_PATH_ODOO", "ODOO_SHAREPOINT_FOLDER"):
+        value = os.getenv(key, "").strip()
+        if value and value not in folders:
+            folders.append(value)
+
+    # Legacy: TARGET_FOLDER_PATH was once "SKIDATA - Odoo". Ignore if it now
+    # points at the raw daily folder.
+    legacy = os.getenv("TARGET_FOLDER_PATH", "").strip()
+    if legacy:
+        legacy_norm = legacy.lower().replace(" ", "")
+        if "daily" in legacy_norm or legacy_norm == "skidatadailyfiles":
+            print(
+                f"Ignoring TARGET_FOLDER_PATH={legacy!r} for Odoo import "
+                f"(raw daily folder)."
+            )
+        elif legacy not in folders:
+            folders.append(legacy)
+
     for name in DEFAULT_FOLDER_CANDIDATES:
         if name not in folders:
             folders.append(name)
@@ -85,6 +105,8 @@ def pick_latest_export(items):
         and any(marker.lower() in item["name"].lower() for marker in FILENAME_MARKERS)
     ]
     if not candidates:
+        names = [i.get("name") for i in items if i.get("file")]
+        print(f"No *-Parking-Transactions-Odoo* file found. Files seen: {names}")
         return None
     candidates.sort(key=lambda i: i.get("lastModifiedDateTime", ""), reverse=True)
     return candidates[0]

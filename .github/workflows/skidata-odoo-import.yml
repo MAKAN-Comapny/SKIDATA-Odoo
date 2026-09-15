@@ -33,7 +33,9 @@ jobs:
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
           SHAREPOINT_SITE_NAME: ${{ secrets.SHAREPOINT_SITE_NAME }}
-          TARGET_FOLDER_PATH: ${{ secrets.TARGET_FOLDER_PATH }}
+          # Transformed *-Odoo.xlsx folder (NOT Skidata_Daily_Files)
+          TARGET_FOLDER_PATH_ODOO: ${{ secrets.TARGET_FOLDER_PATH_ODOO }}
+          TARGET_FOLDER_PATH: ${{ secrets.TARGET_FOLDER_PATH_ODOO }}
           ODOO_URL: ${{ secrets.ODOO_URL }}
           ODOO_DB: ${{ secrets.ODOO_DB }}
           ODOO_USERNAME: ${{ secrets.ODOO_USERNAME }}
