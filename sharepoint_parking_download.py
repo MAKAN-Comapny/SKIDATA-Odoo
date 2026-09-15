@@ -71,11 +71,12 @@ def list_folder_files(headers: dict, site_id: str, folder_path: str) -> list:
     return r.json().get("value", [])
 
 
-def pick_latest_parking(items: list) -> dict:
+def pick_latest_parking(items: list, folder_path: str = "") -> dict:
     """
     Prefer raw Parking-Transactions files (exclude *-Odoo*).
     Newest by lastModifiedDateTime.
     """
+    names = [i.get("name", "") for i in items if i.get("file")]
     candidates = []
     for item in items:
         if not item.get("file"):
@@ -90,9 +91,13 @@ def pick_latest_parking(items: list) -> dict:
         candidates.append(item)
 
     if not candidates:
+        preview = ", ".join(names[:20]) if names else "(empty folder)"
         raise RuntimeError(
             f"No '{PARKING_MARKER}' .xlsx found in SharePoint folder "
-            f"(excluding *-Odoo*)."
+            f"'{folder_path}' (excluding *-Odoo*). "
+            f"Files seen: {preview}. "
+            f"Set TARGET_FOLDER_PATH=Skidata_Daily_Files "
+            f"(not SKIDATA - Odoo)."
         )
     candidates.sort(key=lambda i: i.get("lastModifiedDateTime", ""), reverse=True)
     return candidates[0]
@@ -116,9 +121,22 @@ def fetch_latest_parking_to_exports(dest_dir: str | None = None) -> str:
     Returns local file path.
     """
     dest_dir = dest_dir or EXPORTS_DIR
-    source_folder = (
-        os.getenv("TARGET_FOLDER_PATH", DEFAULT_SOURCE_FOLDER) or DEFAULT_SOURCE_FOLDER
+    # Prefer explicit SOURCE folder; TARGET_FOLDER_PATH may still be the old
+    # "SKIDATA - Odoo" value in GitHub secrets — fall back to daily files.
+    configured = (
+        os.getenv("SHAREPOINT_SOURCE_FOLDER")
+        or os.getenv("TARGET_FOLDER_PATH")
+        or DEFAULT_SOURCE_FOLDER
     ).strip()
+    source_folder = configured
+    if configured.lower().replace(" ", "") in {"skidata-odoo", "skidataodoo"} or (
+        "odoo" in configured.lower() and "daily" not in configured.lower()
+    ):
+        print(
+            f"WARNING: TARGET_FOLDER_PATH={configured!r} looks like the Odoo "
+            f"upload folder. Using {DEFAULT_SOURCE_FOLDER!r} for raw download."
+        )
+        source_folder = DEFAULT_SOURCE_FOLDER
 
     print(f"SharePoint source folder: {source_folder}")
     token = get_access_token()
@@ -126,7 +144,9 @@ def fetch_latest_parking_to_exports(dest_dir: str | None = None) -> str:
     site_id = get_site_id(headers)
 
     items = list_folder_files(headers, site_id, source_folder)
-    latest = pick_latest_parking(items)
+    file_names = [i.get("name") for i in items if i.get("file")]
+    print(f"Files in folder ({len(file_names)}): {file_names}")
+    latest = pick_latest_parking(items, folder_path=source_folder)
     name = latest["name"]
     print(
         f"Latest parking file: {name} "
