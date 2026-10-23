@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+from datetime import datetime
 
 import requests
 from dotenv import load_dotenv
@@ -71,11 +72,20 @@ def list_folder_files(headers: dict, site_id: str, folder_path: str) -> list:
     return r.json().get("value", [])
 
 
+def target_date_prefix() -> str | None:
+    """TARGET_DATE=YYYY-MM-DD selects that day's file by name, e.g. '20-Oct-26-'."""
+    raw = os.getenv("TARGET_DATE", "").strip()
+    if not raw:
+        return None
+    return datetime.strptime(raw, "%Y-%m-%d").strftime("%d-%b-%y") + "-"
+
+
 def pick_latest_parking(items: list, folder_path: str = "") -> dict:
     """
     Prefer raw Parking-Transactions files (exclude *-Odoo*).
-    Newest by lastModifiedDateTime.
+    Newest by lastModifiedDateTime, or with TARGET_DATE set, the file for that day.
     """
+    prefix = target_date_prefix()
     names = [i.get("name", "") for i in items if i.get("file")]
     candidates = []
     for item in items:
@@ -88,10 +98,17 @@ def pick_latest_parking(items: list, folder_path: str = "") -> dict:
             continue
         if "Odoo" in name:
             continue
+        if prefix and not name.startswith(prefix):
+            continue
         candidates.append(item)
 
     if not candidates:
         preview = ", ".join(names[:20]) if names else "(empty folder)"
+        if prefix:
+            raise RuntimeError(
+                f"No '{prefix}{PARKING_MARKER}' .xlsx found in SharePoint folder "
+                f"'{folder_path}'. Files seen: {preview}."
+            )
         raise RuntimeError(
             f"No '{PARKING_MARKER}' .xlsx found in SharePoint folder "
             f"'{folder_path}' (excluding *-Odoo*). "

@@ -6,6 +6,7 @@ Uses the same Microsoft Graph app credentials as SKIDATA-Odoo upload
 """
 import os
 import re
+from datetime import datetime
 
 import requests
 
@@ -96,13 +97,23 @@ def list_folder_files(headers, site_id, folder_path):
     return r.json().get("value", [])
 
 
+def target_date_prefix():
+    """TARGET_DATE=YYYY-MM-DD selects that day's *-Odoo file by name, e.g. '20-Oct-26-'."""
+    raw = os.getenv("TARGET_DATE", "").strip()
+    if not raw:
+        return None
+    return datetime.strptime(raw, "%Y-%m-%d").strftime("%d-%b-%y") + "-"
+
+
 def pick_latest_export(items):
+    prefix = target_date_prefix()
     candidates = [
         item
         for item in items
         if item.get("file")
         and item.get("name", "").lower().endswith((".xlsx", ".csv"))
         and any(marker.lower() in item["name"].lower() for marker in FILENAME_MARKERS)
+        and (not prefix or item["name"].startswith(prefix))
     ]
     if not candidates:
         names = [i.get("name") for i in items if i.get("file")]

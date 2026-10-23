@@ -3,9 +3,18 @@ name: SKIDATA-Odoo SharePoint to Odoo Import
 on:
   workflow_dispatch:
     # Manual run from GitHub Actions tab
+    inputs:
+      target_date:
+        description: "Day to import, YYYY-MM-DD. Leave empty for the newest Odoo file."
+        required: false
+        default: ""
   repository_dispatch:
     # External cron (cron-job.org). Use a DIFFERENT event than the scraper.
     types: [odoo-import]
+
+concurrency:
+  group: skidata-odoo-import
+  cancel-in-progress: false
 
 jobs:
   import-to-odoo:
@@ -48,4 +57,5 @@ jobs:
           ODOO_POST: ${{ secrets.ODOO_POST }}
           ODOO_PAY: ${{ secrets.ODOO_PAY }}
           IMPORT_LIMIT: ${{ secrets.IMPORT_LIMIT }}
+          TARGET_DATE: ${{ inputs.target_date }}
         run: python main_import.py

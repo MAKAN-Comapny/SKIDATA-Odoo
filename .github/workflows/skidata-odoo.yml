@@ -7,9 +7,18 @@ on:
   #   - cron: "0 3 * * *"
   workflow_dispatch:
     # Manual run from GitHub Actions tab
+    inputs:
+      target_date:
+        description: "Day to prepare, YYYY-MM-DD. Leave empty for the newest raw file."
+        required: false
+        default: ""
   repository_dispatch:
     # External cron (e.g. cron-job.org) via GitHub API
     types: [manual-trigger]
+
+concurrency:
+  group: skidata-odoo
+  cancel-in-progress: false
 
 jobs:
   run-pipeline:
@@ -33,6 +42,7 @@ jobs:
       - name: Run Parking Transactions pipeline
         env:
           UPLOAD_TO_SHAREPOINT: "true"
+          TARGET_DATE: ${{ inputs.target_date }}
           TENANT_ID: ${{ secrets.TENANT_ID }}
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
