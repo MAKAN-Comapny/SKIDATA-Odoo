@@ -4,16 +4,20 @@ on:
   workflow_dispatch:
     # Manual run from GitHub Actions tab
     inputs:
+      mode:
+        description: "Mode: 'daily' (standard run) or 'aug_sep_historical' (Aug & Sep -> Odoo_aug_sep)"
+        required: false
+        default: "daily"
       target_date:
-        description: "Day to prepare, YYYY-MM-DD. Leave empty for the newest raw file."
+        description: "Day to prepare (for daily mode), YYYY-MM-DD. Leave empty for newest file."
         required: false
         default: ""
       source_folder:
-        description: "Source SharePoint folder for raw Parking files"
+        description: "Source SharePoint folder (for daily mode)"
         required: false
         default: "Skidata_Daily_Files"
       target_folder_odoo:
-        description: "Destination SharePoint folder for Odoo files (dev branch defaults to Odoo_testing_Sumit)"
+        description: "Destination folder (for daily mode, defaults to Odoo_testing_Sumit)"
         required: false
         default: "Odoo_testing_Sumit"
   repository_dispatch:
@@ -51,8 +55,11 @@ jobs:
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
           SHAREPOINT_SITE_NAME: ${{ secrets.SHAREPOINT_SITE_NAME }}
-          # Raw daily Parking Transactions source folder (Skidata_Daily_Files)
           TARGET_FOLDER_PATH: ${{ inputs.source_folder || 'Skidata_Daily_Files' }}
-          # Transformed *-Odoo.xlsx destination (isolated in Odoo_testing_Sumit on dev)
           TARGET_FOLDER_PATH_ODOO: ${{ inputs.target_folder_odoo || 'Odoo_testing_Sumit' }}
-        run: python main.py
+        run: |
+          if [ "${{ inputs.mode }}" = "aug_sep_historical" ]; then
+            python process_aug_sep.py
+          else
+            python main.py
+          fi
