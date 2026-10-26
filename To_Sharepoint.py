@@ -1,6 +1,6 @@
 """
 Upload transformed Parking Transactions (*-Odoo.xlsx) from Cleaned-Exports/
-to Microsoft SharePoint folder TARGET_FOLDER_PATH_ODOO (default: SKIDATA - Odoo).
+to Microsoft SharePoint folder TARGET_FOLDER_PATH_ODOO (default: Odoo_testing_Sumit for dev).
 
 Run Transformer.py (or main.py) first so Cleaned-Exports/ is populated.
 
@@ -20,15 +20,14 @@ CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 SITE_NAME = os.getenv("SHAREPOINT_SITE_NAME")
 # Destination for transformed *-Odoo.xlsx (NOT the raw daily folder).
-# TARGET_FOLDER_PATH points at Skidata_Daily_Files (raw source) — do not reuse it here.
+# dev branch defaults to Odoo_testing_Sumit for isolated staging.
 TARGET_FOLDER_PATH = (
     os.getenv("TARGET_FOLDER_PATH_ODOO")
     or os.getenv("ODOO_SHAREPOINT_FOLDER")
-    or "SKIDATA - Odoo"
+    or "Odoo_testing_Sumit"
 ).strip()
 
 CLEANED_EXPORTS_DIR = "Cleaned-Exports"
-# Prefer transformed Odoo files; fall back to any Parking-Transactions workbook.
 ODOO_FILE_MARKER = "Parking-Transactions-Odoo"
 PARKING_FILE_MARKER = "Parking-Transactions"
 
@@ -87,9 +86,10 @@ def get_site_id(headers):
     return sites[0]["id"]
 
 
-def ensure_folder_path(site_id, headers):
+def ensure_folder_path(site_id, headers, folder_path: str | None = None):
     """Create nested folders if they don't exist."""
-    parts = [p for p in TARGET_FOLDER_PATH.split("/") if p.strip()]
+    target = folder_path or TARGET_FOLDER_PATH
+    parts = [p for p in target.split("/") if p.strip()]
     current = ""
 
     for part in parts:
@@ -117,22 +117,54 @@ def ensure_folder_path(site_id, headers):
 
 
 def upload_file(site_id, headers, file_path, folder_path: str | None = None):
-    """Upload a single file to SharePoint under the target folder item id."""
+    """Upload a single file to SharePoint. Uses upload session if > 4MB."""
     folder_path = folder_path or TARGET_FOLDER_PATH
-    folder_item = get_folder_item(site_id, headers, folder_path)
-    folder_id = folder_item["id"]
     file_name = os.path.basename(file_path)
     encoded_name = requests.utils.quote(file_name, safe="")
-    upload_url = (
-        f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/items/{folder_id}:"
-        f"/{encoded_name}:/content"
-    )
+    file_size = os.path.getsize(file_path)
 
-    with open(file_path, "rb") as f:
-        r = requests.put(upload_url, headers=headers, data=f)
+    # For files > 4MB, use Graph upload session to avoid 413 error
+    if file_size > 4 * 1024 * 1024:
+        encoded_folder = encode_drive_path(folder_path)
+        session_url = (
+            f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root:"
+            f"/{encoded_folder}/{encoded_name}:/createUploadSession"
+        )
+        payload = {
+            "item": {
+                "@microsoft.graph.conflictBehavior": "replace",
+                "name": file_name,
+            }
+        }
+        r = requests.post(session_url, headers=headers, json=payload)
+        r.raise_for_status()
+        upload_url = r.json()["uploadUrl"]
 
-    r.raise_for_status()
-    return r.json()
+        chunk_size = 10 * 1024 * 1024
+        with open(file_path, "rb") as f:
+            start = 0
+            while start < file_size:
+                chunk = f.read(chunk_size)
+                end = start + len(chunk) - 1
+                chunk_headers = {
+                    "Content-Range": f"bytes {start}-{end}/{file_size}",
+                    "Content-Length": str(len(chunk)),
+                }
+                res = requests.put(upload_url, headers=chunk_headers, data=chunk)
+                res.raise_for_status()
+                start += len(chunk)
+        return res.json()
+    else:
+        folder_item = get_folder_item(site_id, headers, folder_path)
+        folder_id = folder_item["id"]
+        upload_url = (
+            f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/items/{folder_id}:"
+            f"/{encoded_name}:/content"
+        )
+        with open(file_path, "rb") as f:
+            r = requests.put(upload_url, headers=headers, data=f)
+        r.raise_for_status()
+        return r.json()
 
 
 def main():

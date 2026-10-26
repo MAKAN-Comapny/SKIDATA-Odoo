@@ -28,6 +28,11 @@ def _env(name: str, default: str | None = None) -> str:
     return str(value).strip()
 
 
+def encode_drive_path(path: str) -> str:
+    """URL-encode each folder/file segment for Graph drive paths."""
+    return "/".join(requests.utils.quote(part, safe="") for part in path.split("/") if part)
+
+
 def get_access_token() -> str:
     token_url = f"https://login.microsoftonline.com/{_env('TENANT_ID')}/oauth2/v2.0/token"
     data = {
@@ -64,20 +69,43 @@ def get_site_id(headers: dict) -> str:
 
 
 def list_folder_files(headers: dict, site_id: str, folder_path: str) -> list:
-    url = f"{GRAPH_BASE}/sites/{site_id}/drive/root:/{folder_path}:/children"
+    encoded_path = encode_drive_path(folder_path)
+    url = f"{GRAPH_BASE}/sites/{site_id}/drive/root:/{encoded_path}:/children"
     r = requests.get(url, headers=headers, timeout=30)
     if r.status_code == 404:
+        # Fallback between Skidata_Daily_Files and Ski-data-daily
+        alt_folder = None
+        clean_name = folder_path.lower().replace(" ", "").replace("-", "").replace("_", "")
+        if "skidata" in clean_name and "daily" in clean_name:
+            if folder_path == "Skidata_Daily_Files":
+                alt_folder = "Ski-data-daily"
+            else:
+                alt_folder = "Skidata_Daily_Files"
+        if alt_folder:
+            print(f"Folder '{folder_path}' not found (404), trying alternate '{alt_folder}'...")
+            alt_url = f"{GRAPH_BASE}/sites/{site_id}/drive/root:/{encode_drive_path(alt_folder)}:/children"
+            r2 = requests.get(alt_url, headers=headers, timeout=30)
+            if r2.status_code == 200:
+                return r2.json().get("value", [])
         raise RuntimeError(f"SharePoint folder not found: {folder_path}")
     r.raise_for_status()
     return r.json().get("value", [])
 
 
-def target_date_prefix() -> str | None:
-    """TARGET_DATE=YYYY-MM-DD selects that day's file by name, e.g. '20-Oct-26-'."""
+def target_date_prefixes() -> list[str]:
+    """TARGET_DATE=YYYY-MM-DD selects that day's file by name, e.g. '20-Oct-26-' or '20-Oct-2026-'."""
     raw = os.getenv("TARGET_DATE", "").strip()
     if not raw:
-        return None
-    return datetime.strptime(raw, "%Y-%m-%d").strftime("%d-%b-%y") + "-"
+        return []
+    try:
+        dt = datetime.strptime(raw, "%Y-%m-%d")
+        return [
+            dt.strftime("%d-%b-%y") + "-",
+            dt.strftime("%d-%b-%Y") + "-",
+            dt.strftime("%Y-%m-%d") + "-",
+        ]
+    except ValueError:
+        return [raw + "-"]
 
 
 def pick_latest_parking(items: list, folder_path: str = "") -> dict:
@@ -85,7 +113,7 @@ def pick_latest_parking(items: list, folder_path: str = "") -> dict:
     Prefer raw Parking-Transactions files (exclude *-Odoo*).
     Newest by lastModifiedDateTime, or with TARGET_DATE set, the file for that day.
     """
-    prefix = target_date_prefix()
+    prefixes = target_date_prefixes()
     names = [i.get("name", "") for i in items if i.get("file")]
     candidates = []
     for item in items:
@@ -98,15 +126,15 @@ def pick_latest_parking(items: list, folder_path: str = "") -> dict:
             continue
         if "Odoo" in name:
             continue
-        if prefix and not name.startswith(prefix):
+        if prefixes and not any(name.startswith(p) for p in prefixes):
             continue
         candidates.append(item)
 
     if not candidates:
         preview = ", ".join(names[:20]) if names else "(empty folder)"
-        if prefix:
+        if prefixes:
             raise RuntimeError(
-                f"No '{prefix}{PARKING_MARKER}' .xlsx found in SharePoint folder "
+                f"No '{prefixes[0]}{PARKING_MARKER}' .xlsx found in SharePoint folder "
                 f"'{folder_path}'. Files seen: {preview}."
             )
         raise RuntimeError(
@@ -179,7 +207,7 @@ def fetch_latest_parking_to_exports(dest_dir: str | None = None) -> str:
 
     dest_path = os.path.join(dest_dir, name)
     download_file(latest, dest_path)
-    print(f"Downloaded to: {dest_path} ({os.path.getsize(dest_path)} bytes)")
+    print(f"Downloaded to: {dest_path} ({os.path.getsize(dest_path):,} bytes)")
     return dest_path
 
 

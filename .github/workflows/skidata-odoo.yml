@@ -1,10 +1,6 @@
 name: SKIDATA-Odoo Parking Pipeline
 
 on:
-  # Disabled: using external cron-job.org instead. Uncomment to re-enable GitHub schedule.
-  # schedule:
-  #   # Daily at 03:00 UTC (06:00 AST / Saudi)
-  #   - cron: "0 3 * * *"
   workflow_dispatch:
     # Manual run from GitHub Actions tab
     inputs:
@@ -12,6 +8,14 @@ on:
         description: "Day to prepare, YYYY-MM-DD. Leave empty for the newest raw file."
         required: false
         default: ""
+      source_folder:
+        description: "Source SharePoint folder for raw Parking files"
+        required: false
+        default: "Skidata_Daily_Files"
+      target_folder_odoo:
+        description: "Destination SharePoint folder for Odoo files (dev branch defaults to Odoo_testing_Sumit)"
+        required: false
+        default: "Odoo_testing_Sumit"
   repository_dispatch:
     # External cron (e.g. cron-job.org) via GitHub API
     types: [manual-trigger]
@@ -47,8 +51,8 @@ jobs:
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
           SHAREPOINT_SITE_NAME: ${{ secrets.SHAREPOINT_SITE_NAME }}
-          # Raw daily Parking Transactions source folder
-          TARGET_FOLDER_PATH: ${{ secrets.TARGET_FOLDER_PATH }}
-          # Transformed *-Odoo.xlsx destination (defaults to "SKIDATA - Odoo" if unset)
-          TARGET_FOLDER_PATH_ODOO: ${{ secrets.TARGET_FOLDER_PATH_ODOO }}
+          # Raw daily Parking Transactions source folder (Skidata_Daily_Files)
+          TARGET_FOLDER_PATH: ${{ inputs.source_folder || 'Skidata_Daily_Files' }}
+          # Transformed *-Odoo.xlsx destination (isolated in Odoo_testing_Sumit on dev)
+          TARGET_FOLDER_PATH_ODOO: ${{ inputs.target_folder_odoo || 'Odoo_testing_Sumit' }}
         run: python main.py
