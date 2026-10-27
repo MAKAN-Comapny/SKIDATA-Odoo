@@ -167,7 +167,14 @@ def upload_file(site_id, headers, file_path, folder_path: str | None = None):
         return r.json()
 
 
-def main():
+def upload_cleaned_files(dest_folder: str | None = None) -> list[str]:
+    folder_to_use = (
+        dest_folder
+        or os.getenv("TARGET_FOLDER_PATH_ODOO")
+        or os.getenv("ODOO_SHAREPOINT_FOLDER")
+        or TARGET_FOLDER_PATH
+    ).strip()
+
     missing = [
         k
         for k, v in {
@@ -190,12 +197,20 @@ def main():
         )
 
     all_xlsx = glob.glob(os.path.join(CLEANED_EXPORTS_DIR, "*.xlsx"))
-    files = [f for f in all_xlsx if ODOO_FILE_MARKER in os.path.basename(f)]
+    files = [
+        f for f in all_xlsx
+        if ODOO_FILE_MARKER in os.path.basename(f)
+        or "Audit" in os.path.basename(f)
+        or "Summary" in os.path.basename(f)
+    ]
     if not files:
         files = [f for f in all_xlsx if PARKING_FILE_MARKER in os.path.basename(f)]
     if not files:
+        files = all_xlsx
+
+    if not files:
         raise SystemExit(
-            f"No Parking Transactions / Odoo .xlsx files in '{CLEANED_EXPORTS_DIR}'. "
+            f"No files found in '{CLEANED_EXPORTS_DIR}' to upload. "
             "Run Transformer.py first."
         )
 
@@ -206,20 +221,27 @@ def main():
     print("Resolving SharePoint site...")
     site_id = get_site_id(headers)
 
-    print(f"Ensuring folder path exists: {TARGET_FOLDER_PATH}")
-    ensure_folder_path(site_id, headers)
+    print(f"Ensuring folder path exists: {folder_to_use}")
+    ensure_folder_path(site_id, headers, folder_to_use)
 
-    print(f"Uploading {len(files)} file(s) to '{TARGET_FOLDER_PATH}'...")
+    print(f"Uploading {len(files)} file(s) to '{folder_to_use}'...")
+    uploaded = []
     for fp in files:
         try:
-            result = upload_file(site_id, headers, fp)
+            result = upload_file(site_id, headers, fp, folder_path=folder_to_use)
             print(f"  OK: {os.path.basename(fp)} -> {result.get('webUrl', 'uploaded')}")
+            uploaded.append(fp)
             os.remove(fp)
         except requests.RequestException as e:
             print(f"  FAIL: {os.path.basename(fp)} - {e}")
             raise
 
-    print("Done.")
+    print(f"Uploaded {len(uploaded)} file(s) successfully to '{folder_to_use}'.")
+    return uploaded
+
+
+def main():
+    upload_cleaned_files()
 
 
 if __name__ == "__main__":

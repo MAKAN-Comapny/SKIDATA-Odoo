@@ -18,7 +18,7 @@ load_dotenv()
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 EXPORTS_DIR = "exports"
 PARKING_MARKER = "Parking-Transactions"
-DEFAULT_SOURCE_FOLDER = "Skidata_Daily_Files"
+DEFAULT_SOURCE_FOLDER = "Ski Data 5"
 
 
 def _env(name: str, default: str | None = None) -> str:
@@ -110,8 +110,8 @@ def target_date_prefixes() -> list[str]:
 
 def pick_latest_parking(items: list, folder_path: str = "") -> dict:
     """
-    Prefer raw Parking-Transactions files (exclude *-Odoo*).
-    Newest by lastModifiedDateTime, or with TARGET_DATE set, the file for that day.
+    Prefer raw Parking-Transactions files (exclude *-Odoo*, audit, and summary files).
+    Newest by lastModifiedDateTime, or with TARGET_DATE set, the file matching that day.
     """
     prefixes = target_date_prefixes()
     names = [i.get("name", "") for i in items if i.get("file")]
@@ -124,9 +124,9 @@ def pick_latest_parking(items: list, folder_path: str = "") -> dict:
             continue
         if PARKING_MARKER not in name:
             continue
-        if "Odoo" in name:
+        if "odoo" in name.lower() or "audit" in name.lower() or "summary" in name.lower():
             continue
-        if prefixes and not any(name.startswith(p) for p in prefixes):
+        if prefixes and not any(p.rstrip("-").lower() in name.lower() for p in prefixes):
             continue
         candidates.append(item)
 
@@ -134,15 +134,12 @@ def pick_latest_parking(items: list, folder_path: str = "") -> dict:
         preview = ", ".join(names[:20]) if names else "(empty folder)"
         if prefixes:
             raise RuntimeError(
-                f"No '{prefixes[0]}{PARKING_MARKER}' .xlsx found in SharePoint folder "
+                f"No '{prefixes[0]}' '{PARKING_MARKER}' .xlsx found in SharePoint folder "
                 f"'{folder_path}'. Files seen: {preview}."
             )
         raise RuntimeError(
-            f"No '{PARKING_MARKER}' .xlsx found in SharePoint folder "
-            f"'{folder_path}' (excluding *-Odoo*). "
-            f"Files seen: {preview}. "
-            f"Set TARGET_FOLDER_PATH=Skidata_Daily_Files "
-            f"(not SKIDATA - Odoo)."
+            f"No raw '{PARKING_MARKER}' .xlsx found in SharePoint folder "
+            f"'{folder_path}'. Files seen: {preview}."
         )
     candidates.sort(key=lambda i: i.get("lastModifiedDateTime", ""), reverse=True)
     return candidates[0]
@@ -160,41 +157,104 @@ def download_file(item: dict, dest_path: str) -> str:
     return dest_path
 
 
-def fetch_latest_parking_to_exports(dest_dir: str | None = None) -> str:
+def fetch_previous_seen_tickets(
+    headers: dict,
+    site_id: str,
+    dest_folder: str = "Odoo_testing_Sumit",
+    temp_dir: str = "exports/previous_runs",
+) -> set[str]:
     """
-    Download latest raw Parking Transactions from SharePoint into exports/.
-    Returns local file path.
+    Inspect dest_folder on SharePoint for existing *-Odoo.xlsx files.
+    Extract 'Ticket Sequence' numbers to simulate SQL MERGE / deduplication against prior runs.
+    """
+    seen_tickets: set[str] = set()
+    try:
+        items = list_folder_files(headers, site_id, dest_folder)
+        odoo_files = [
+            i
+            for i in items
+            if i.get("file")
+            and i.get("name", "").lower().endswith((".xlsx", ".xlsm"))
+            and "-odoo" in i.get("name", "").lower()
+            and "audit" not in i.get("name", "").lower()
+        ]
+        if not odoo_files:
+            print(f"No previous *-Odoo.xlsx files found in '{dest_folder}'. First test run.")
+            return seen_tickets
+
+        # Sort newest first
+        odoo_files.sort(key=lambda i: i.get("lastModifiedDateTime", ""), reverse=True)
+        latest_prev = odoo_files[0]
+        os.makedirs(temp_dir, exist_ok=True)
+        local_path = os.path.join(temp_dir, latest_prev["name"])
+        print(f"Checking previous run file '{latest_prev['name']}' in '{dest_folder}' for delta comparison...")
+        download_file(latest_prev, local_path)
+
+        import pandas as pd
+        df_prev = pd.read_excel(local_path, dtype=str)
+        ticket_col = None
+        for col in df_prev.columns:
+            if "ticket" in str(col).lower() and "sequence" in str(col).lower():
+                ticket_col = col
+                break
+        if ticket_col:
+            for val in df_prev[ticket_col].dropna():
+                cleaned = str(val).strip()
+                if cleaned and cleaned.lower() not in ("nan", "none"):
+                    seen_tickets.add(cleaned)
+            print(f"Loaded {len(seen_tickets):,} previously seen ticket sequence(s) from '{latest_prev['name']}'.")
+        else:
+            print(f"Warning: 'Ticket Sequence' column not found in '{latest_prev['name']}'.")
+
+        if os.path.exists(local_path):
+            os.remove(local_path)
+
+    except Exception as e:
+        print(f"Notice: Could not load previous run tickets from '{dest_folder}': {e}")
+        print("Continuing with 0 previous tickets (all tickets evaluated as new).")
+
+    return seen_tickets
+
+
+def fetch_latest_parking_and_seen_tickets(
+    source_folder: str | None = None,
+    dest_folder: str | None = None,
+    dest_dir: str | None = None,
+) -> tuple[str, set[str]]:
+    """
+    Download latest raw Parking Transactions from source_folder and collect
+    seen tickets from dest_folder for SQL MERGE delta tracking.
     """
     dest_dir = dest_dir or EXPORTS_DIR
-    # Prefer explicit SOURCE folder; TARGET_FOLDER_PATH may still be the old
-    # "SKIDATA - Odoo" value in GitHub secrets — fall back to daily files.
-    configured = (
-        os.getenv("SHAREPOINT_SOURCE_FOLDER")
+    source = (
+        source_folder
+        or os.getenv("SHAREPOINT_SOURCE_FOLDER")
         or os.getenv("TARGET_FOLDER_PATH")
         or DEFAULT_SOURCE_FOLDER
     ).strip()
-    source_folder = configured
-    if configured.lower().replace(" ", "") in {"skidata-odoo", "skidataodoo"} or (
-        "odoo" in configured.lower() and "daily" not in configured.lower()
-    ):
-        print(
-            f"WARNING: TARGET_FOLDER_PATH={configured!r} looks like the Odoo "
-            f"upload folder. Using {DEFAULT_SOURCE_FOLDER!r} for raw download."
-        )
-        source_folder = DEFAULT_SOURCE_FOLDER
+    dest = (
+        dest_folder
+        or os.getenv("TARGET_FOLDER_PATH_ODOO")
+        or "Odoo_testing_Sumit"
+    ).strip()
 
-    print(f"SharePoint source folder: {source_folder}")
+    print(f"SharePoint source folder:      {source}")
+    print(f"SharePoint destination folder: {dest}")
     token = get_access_token()
     headers = {"Authorization": f"Bearer {token}"}
     site_id = get_site_id(headers)
 
-    items = list_folder_files(headers, site_id, source_folder)
+    # 1. Fetch previous tickets for SQL MERGE delta comparison
+    seen_tickets = fetch_previous_seen_tickets(headers, site_id, dest_folder=dest)
+
+    # 2. Download latest raw Parking Transactions file
+    items = list_folder_files(headers, site_id, source)
     file_names = [i.get("name") for i in items if i.get("file")]
-    print(f"Files in folder ({len(file_names)}): {file_names}")
-    latest = pick_latest_parking(items, folder_path=source_folder)
+    print(f"Files found in source ({len(file_names)}): {file_names}")
+    latest = pick_latest_parking(items, folder_path=source)
     name = latest["name"]
     print(
-        f"Latest parking file: {name} "
+        f"Selected raw parking file: {name} "
         f"(modified {latest.get('lastModifiedDateTime', '?')})"
     )
 
@@ -208,8 +268,15 @@ def fetch_latest_parking_to_exports(dest_dir: str | None = None) -> str:
     dest_path = os.path.join(dest_dir, name)
     download_file(latest, dest_path)
     print(f"Downloaded to: {dest_path} ({os.path.getsize(dest_path):,} bytes)")
-    return dest_path
+
+    return dest_path, seen_tickets
+
+
+def fetch_latest_parking_to_exports(dest_dir: str | None = None) -> str:
+    """Download latest raw Parking Transactions from SharePoint into exports/."""
+    path, _ = fetch_latest_parking_and_seen_tickets(dest_dir=dest_dir)
+    return path
 
 
 if __name__ == "__main__":
-    fetch_latest_parking_to_exports()
+    fetch_latest_parking_and_seen_tickets()
