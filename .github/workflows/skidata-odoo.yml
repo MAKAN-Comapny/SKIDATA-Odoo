@@ -59,7 +59,11 @@ jobs:
           TARGET_FOLDER_PATH_ODOO: ${{ inputs.target_folder_odoo || 'Odoo_testing_Sumit' }}
         run: |
           if [ "${{ inputs.mode }}" = "aug_sep_historical" ]; then
-            python process_aug_sep.py
+            if [ -n "${{ inputs.source_folder }}" ] && [ "${{ inputs.source_folder }}" != "Skidata_Daily_Files" ]; then
+              python process_aug_sep.py --source-folder "${{ inputs.source_folder }}"
+            else
+              python process_aug_sep.py
+            fi
           else
             python main.py
           fi

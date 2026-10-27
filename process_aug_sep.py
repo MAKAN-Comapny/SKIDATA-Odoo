@@ -129,15 +129,44 @@ def process_month(config: dict, site_id: str, headers: dict):
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="SKIDATA-Odoo: Historical Pipeline")
+    parser.add_argument(
+        "--source-folder",
+        type=str,
+        default="",
+        help="Optional single SharePoint source folder (e.g. 'Validated_Docs/old/Aug' or 'Validated_Docs/old/10-Oct-26-to-23-Oct-26')",
+    )
+    parser.add_argument(
+        "--dest-folder",
+        type=str,
+        default="",
+        help="Optional destination folder (default: Odoo_aug_sep)",
+    )
+    args = parser.parse_args()
+
+    dest = args.dest_folder.strip() or TARGET_ODOO_FOLDER
+
+    if args.source_folder.strip():
+        src = args.source_folder.strip()
+        configs_to_run = [{
+            "month_name": os.path.basename(src),
+            "source_folder": src,
+            "dest_folder": dest,
+        }]
+    else:
+        configs_to_run = MONTH_CONFIGS
+
     print("=" * 65)
-    print("SKIDATA-Odoo: Historical August & September Pipeline")
+    print("SKIDATA-Odoo: Historical Pipeline")
+    print(f"Tasks: {len(configs_to_run)} folder(s) -> '{dest}'")
     print("=" * 65)
 
     token = get_access_token()
     headers = {"Authorization": f"Bearer {token}"}
     site_id = get_site_id(headers)
 
-    for cfg in MONTH_CONFIGS:
+    for cfg in configs_to_run:
         try:
             process_month(cfg, site_id, headers)
         except Exception as e:
@@ -145,7 +174,7 @@ def main():
             raise
 
     print("\n" + "=" * 65)
-    print(f"ALL HISTORICAL ODOO FILES SUCCESSFULLY GENERATED AND UPLOADED TO '{TARGET_ODOO_FOLDER}'!")
+    print(f"ALL HISTORICAL ODOO FILES SUCCESSFULLY GENERATED AND UPLOADED TO '{dest}'!")
     print("=" * 65)
 
 
