@@ -1,6 +1,9 @@
 name: SKIDATA-Odoo Parking Pipeline
 
 on:
+  schedule:
+    # 05:30 UTC = 08:30 AM Saudi Time (AST) - Runs 30 mins after scraper starts at 08:00 AM Saudi
+    - cron: "30 5 * * *"
   workflow_dispatch:
     # Manual run from GitHub Actions tab
     inputs:
@@ -36,6 +39,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref || 'feature/5-days-rolling' }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
