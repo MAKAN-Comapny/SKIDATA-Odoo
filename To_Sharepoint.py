@@ -175,6 +175,10 @@ def upload_cleaned_files(dest_folder: str | None = None) -> list[str]:
         or TARGET_FOLDER_PATH
     ).strip()
 
+    if folder_to_use in {"SKIDATA - Odoo", "Skidata_Daily_Files", "Ski-data-daily"}:
+        print(f"SAFETY GUARDRAIL: Blocked upload to '{folder_to_use}' on test branch. Redirecting to 'Odoo_testing_Sumit'.")
+        folder_to_use = "Odoo_testing_Sumit" 
+
     missing = [
         k
         for k, v in {

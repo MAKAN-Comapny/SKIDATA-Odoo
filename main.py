@@ -38,6 +38,12 @@ def main():
     )
     dest = os.getenv("TARGET_FOLDER_PATH_ODOO") or "Odoo_testing_Sumit"
 
+    # Multi-layer safety guardrail: Block any accident to production folders
+    if dest in {"SKIDATA - Odoo", "Skidata_Daily_Files", "Ski-data-daily"}:
+        print(f"SAFETY GUARDRAIL: Blocked destination '{dest}' on dev test. Redirecting to 'Odoo_testing_Sumit'.")
+        dest = "Odoo_testing_Sumit"
+        os.environ["TARGET_FOLDER_PATH_ODOO"] = "Odoo_testing_Sumit"
+
     print("=" * 70)
     print("SKIDATA-Odoo 5-Day Rolling Pipeline (Testing Mode)")
     print(f"Source:             SharePoint -> {source}")
