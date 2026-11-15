@@ -1,6 +1,9 @@
 name: SKIDATA-Odoo SharePoint to Odoo Import
 
 on:
+  schedule:
+    # 06:50 UTC = 09:50 AM Saudi Time (AST) / 12:20 PM IST (1 hr after morning scraper)
+    - cron: "50 6 * * *"
   workflow_dispatch:
     # Manual run from GitHub Actions tab
     inputs:
@@ -8,9 +11,6 @@ on:
         description: "Day to import, YYYY-MM-DD. Leave empty for the newest Odoo file."
         required: false
         default: ""
-  repository_dispatch:
-    # External cron (cron-job.org). Use a DIFFERENT event than the scraper.
-    types: [odoo-import]
 
 concurrency:
   group: skidata-odoo-import
