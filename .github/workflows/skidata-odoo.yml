@@ -25,9 +25,10 @@ on:
         description: "Destination folder (defaults to 'Odoo_testing_Sumit')"
         required: false
         default: "Odoo_testing_Sumit"
-  repository_dispatch:
-    # External cron (e.g. cron-job.org) via GitHub API
-    types: [manual-trigger]
+  # Disabled: redundant step because SKIDATA_SCRAPER already generates
+  # and uploads the transformed Odoo file directly.
+  # repository_dispatch:
+  #   types: [manual-trigger]
 
 concurrency:
   group: skidata-odoo
