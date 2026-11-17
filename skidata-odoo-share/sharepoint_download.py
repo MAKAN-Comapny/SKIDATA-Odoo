@@ -113,7 +113,11 @@ def pick_latest_export(items):
         if item.get("file")
         and item.get("name", "").lower().endswith((".xlsx", ".csv"))
         and any(marker.lower() in item["name"].lower() for marker in FILENAME_MARKERS)
-        and (not prefix or item["name"].startswith(prefix))
+        and (
+            not prefix
+            or item["name"].startswith(prefix)
+            or (prefix.rstrip("-").lower() in item["name"].lower())
+        )
     ]
     if not candidates:
         names = [i.get("name") for i in items if i.get("file")]
