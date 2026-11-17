@@ -1,11 +1,12 @@
 name: SKIDATA-Odoo SharePoint to Odoo Import
 
 on:
-  schedule:
-    # Run 1: 06:50 UTC = 09:50 AM Saudi Time (AST) / 12:20 PM IST (1 hr after morning scraper)
-    - cron: "50 6 * * *"
-    # Run 2: 10:00 UTC = 01:00 PM Saudi Time (AST) / 03:30 PM IST (1 hr after midday scraper)
-    - cron: "0 10 * * *"
+  # schedule:
+  #   # Disabled in favor of reliable external cron-job.org triggers (avoids GitHub Actions queue delay)
+  #   # Run 1: 06:50 UTC = 09:50 AM Saudi Time (AST) / 12:20 PM IST (1 hr after morning scraper)
+  #   - cron: "50 6 * * *"
+  #   # Run 2: 10:00 UTC = 01:00 PM Saudi Time (AST) / 03:30 PM IST (1 hr after midday scraper)
+  #   - cron: "0 10 * * *"
   repository_dispatch:
     # External cron (cron-job.org) trigger support
     types: [odoo-import]
