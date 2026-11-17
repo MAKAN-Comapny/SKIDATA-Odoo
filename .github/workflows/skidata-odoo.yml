@@ -1,11 +1,12 @@
 name: SKIDATA-Odoo Parking Pipeline
 
 on:
-  schedule:
-    # Run 1: 05:30 UTC = 08:30 AM Saudi Time (AST) - After morning 15-day scraper
-    - cron: "30 5 * * *"
-    # Run 2: 10:15 UTC = 01:15 PM Saudi Time (AST) - After midday 15-day scraper
-    - cron: "15 10 * * *"
+  # schedule:
+  #   # Disabled in favor of reliable external cron-job.org triggers (avoids GitHub Actions queue delay)
+  #   # Run 1: 05:30 UTC = 08:30 AM Saudi Time (AST) - After morning 15-day scraper
+  #   - cron: "30 5 * * *"
+  #   # Run 2: 10:15 UTC = 01:15 PM Saudi Time (AST) - After midday 15-day scraper
+  #   - cron: "15 10 * * *"
   workflow_dispatch:
     # Manual run from GitHub Actions tab
     inputs:
