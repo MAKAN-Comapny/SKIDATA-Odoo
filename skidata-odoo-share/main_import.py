@@ -5,9 +5,10 @@ Used by GitHub Actions / cron. No interactive prompt.
 """
 import os
 import sys
+import time
 
-import import_csv_batch
 import config
+import import_csv_batch
 import odoo_client
 import sharepoint_download
 
@@ -80,6 +81,20 @@ def run():
     created = results["created"]
     skipped = results["skipped_duplicate"]
     failed = results["failed"]
+
+    # If any tickets failed due to transient gateway hiccups, perform a second pass retry
+    if failed:
+        print(f"\n[Retry Pass] Attempting to re-process {len(failed)} failed ticket(s) after 5s recovery pause...")
+        time.sleep(5.0)
+        failed_keys = {item_fail["ticket_sequence"] for item_fail in failed}
+        retry_payloads = [p for p in payloads if p[0] in failed_keys]
+        retry_results = client.process_batch(
+            retry_payloads, post=post, pay=pay, payment_journal_id=payment_journal_id
+        )
+        created.extend(retry_results["created"])
+        skipped.extend(retry_results["skipped_duplicate"])
+        failed = retry_results["failed"]
+        print(f"[Retry Pass] Recovered created: {len(retry_results['created'])}, duplicate: {len(retry_results['skipped_duplicate'])}, remaining failed: {len(failed)}")
 
     print("\n=== Results ===")
     print(f"Created : {len(created)}")

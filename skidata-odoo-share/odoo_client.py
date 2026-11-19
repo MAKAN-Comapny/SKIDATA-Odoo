@@ -11,11 +11,63 @@ Key robustness behaviors:
     post=True is passed. Registering a payment (pay=True) implies
     post=True, since Odoo requires an invoice to be posted before a
     payment can be registered against it.
+  - Transient error retry with exponential backoff: handles 502/503/504
+    HTML gateway timeout and proxy disconnects gracefully.
+  - Micro-pacing between requests: prevents saturating Odoo web workers.
 """
 
+import http.client
+import socket
+import time
 import xmlrpc.client
 
 import config
+
+
+def is_transient_rpc_error(exc: Exception) -> bool:
+    """Detect transient gateway, proxy (502/503/504), network, or server overload errors."""
+    msg = str(exc).lower()
+    if "<!doctype html" in msg or "<html" in msg:
+        return True
+    if any(
+        code in msg
+        for code in (
+            "502",
+            "503",
+            "504",
+            "bad gateway",
+            "gateway time-out",
+            "service temporarily unavailable",
+        )
+    ):
+        return True
+    if any(
+        net_err in msg
+        for net_err in (
+            "connection reset",
+            "connection refused",
+            "remotedisconnected",
+            "timed out",
+            "timeout",
+            "broken pipe",
+        )
+    ):
+        return True
+    if isinstance(
+        exc,
+        (
+            xmlrpc.client.ProtocolError,
+            xmlrpc.client.ResponseError,
+            ConnectionError,
+            TimeoutError,
+            socket.timeout,
+            http.client.RemoteDisconnected,
+            http.client.IncompleteRead,
+            OSError,
+        ),
+    ):
+        return True
+    return False
 
 
 class OdooClient:
@@ -32,10 +84,37 @@ class OdooClient:
             )
         self.models = xmlrpc.client.ServerProxy(f"{self.url}/xmlrpc/2/object")
 
-    def _execute(self, model, method, *args, **kwargs):
-        return self.models.execute_kw(
-            self.db, self.uid, config.ODOO_API_KEY, model, method, list(args), kwargs
-        )
+    def _execute(self, model, method, *args, max_retries=4, base_delay=2.0, **kwargs):
+        """Execute an XML-RPC method on Odoo with exponential backoff for transient errors."""
+        last_exc = None
+        for attempt in range(max_retries):
+            try:
+                return self.models.execute_kw(
+                    self.db,
+                    self.uid,
+                    config.ODOO_API_KEY,
+                    model,
+                    method,
+                    list(args),
+                    kwargs,
+                )
+            except Exception as exc:
+                last_exc = exc
+                if attempt < max_retries - 1 and is_transient_rpc_error(exc):
+                    delay = base_delay * (2**attempt)
+                    print(
+                        f"Warning: Transient Odoo RPC error during {model}.{method} "
+                        f"(attempt {attempt + 1}/{max_retries}): {exc!r}. Retrying in {delay:.1f}s..."
+                    )
+                    time.sleep(delay)
+                    try:
+                        self.models = xmlrpc.client.ServerProxy(
+                            f"{self.url}/xmlrpc/2/object"
+                        )
+                    except Exception:
+                        pass
+                else:
+                    raise last_exc
 
     def already_posted(self, ticket_sequence):
         """Dedupe check: does an account.move with this ticket_sequence exist already?"""
@@ -69,11 +148,19 @@ class OdooClient:
             "account.payment.register", "action_create_payments", [wizard_id]
         )
 
-    def process_batch(self, ticket_payloads, post=False, pay=False, payment_journal_id=None):
+    def process_batch(
+        self,
+        ticket_payloads,
+        post=False,
+        pay=False,
+        payment_journal_id=None,
+        pacing_delay=0.08,
+    ):
         """
         ticket_payloads: list of (access_id_or_ticket_sequence, payload) tuples.
         post: validate (action_post) each created invoice.
         pay: register a full payment for each invoice (implies post=True).
+        pacing_delay: sleep in seconds between tickets to protect Odoo web workers (default: 80ms).
         """
         if pay:
             post = True
@@ -115,5 +202,8 @@ class OdooClient:
                 results["failed"].append(
                     {"ticket_sequence": ticket_sequence, "error": str(exc)}
                 )
+
+            if pacing_delay > 0:
+                time.sleep(pacing_delay)
 
         return results
