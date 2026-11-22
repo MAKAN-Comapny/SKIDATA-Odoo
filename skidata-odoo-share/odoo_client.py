@@ -11,8 +11,11 @@ Key robustness behaviors:
     post=True is passed. Registering a payment (pay=True) implies
     post=True, since Odoo requires an invoice to be posted before a
     payment can be registered against it.
+  - Auto-retry with backoff: handles transient reverse-proxy / network
+    glitches (HTTP 502/503/504 Bad Gateway, HTML doctype responses, connection resets).
 """
 
+import time
 import xmlrpc.client
 
 import config
@@ -23,9 +26,18 @@ class OdooClient:
         self.url = config.ODOO_URL
         self.db = config.ODOO_DB
         common = xmlrpc.client.ServerProxy(f"{self.url}/xmlrpc/2/common")
-        self.uid = common.authenticate(
-            self.db, config.ODOO_USERNAME, config.ODOO_API_KEY, {}
-        )
+        for attempt in range(1, 4):
+            try:
+                self.uid = common.authenticate(
+                    self.db, config.ODOO_USERNAME, config.ODOO_API_KEY, {}
+                )
+                break
+            except Exception as exc:
+                if attempt < 3:
+                    time.sleep(2 * attempt)
+                    common = xmlrpc.client.ServerProxy(f"{self.url}/xmlrpc/2/common")
+                    continue
+                raise
         if not self.uid:
             raise RuntimeError(
                 "Odoo authentication failed -- check ODOO_USERNAME/ODOO_API_KEY"
@@ -33,9 +45,53 @@ class OdooClient:
         self.models = xmlrpc.client.ServerProxy(f"{self.url}/xmlrpc/2/object")
 
     def _execute(self, model, method, *args, **kwargs):
-        return self.models.execute_kw(
-            self.db, self.uid, config.ODOO_API_KEY, model, method, list(args), kwargs
-        )
+        max_retries = 3
+        backoff_seconds = 2
+        for attempt in range(1, max_retries + 1):
+            try:
+                return self.models.execute_kw(
+                    self.db, self.uid, config.ODOO_API_KEY, model, method, list(args), kwargs
+                )
+            except Exception as exc:
+                err_str = str(exc)
+                is_transient = (
+                    isinstance(
+                        exc,
+                        (
+                            xmlrpc.client.ProtocolError,
+                            xmlrpc.client.ResponseError,
+                            TimeoutError,
+                            OSError,
+                        ),
+                    )
+                    or any(
+                        code in err_str.lower()
+                        for code in (
+                            "502",
+                            "503",
+                            "504",
+                            "bad gateway",
+                            "gateway timeout",
+                            "doctype html",
+                            "connection reset",
+                            "remotedisconnected",
+                            "temporarily unavailable",
+                        )
+                    )
+                )
+                if is_transient and attempt < max_retries:
+                    wait_time = backoff_seconds * attempt
+                    print(
+                        f"Transient Odoo communication error ({err_str.strip()[:80]}). "
+                        f"Retrying in {wait_time}s (attempt {attempt}/{max_retries})..."
+                    )
+                    time.sleep(wait_time)
+                    try:
+                        self.models = xmlrpc.client.ServerProxy(f"{self.url}/xmlrpc/2/object")
+                    except Exception:
+                        pass
+                    continue
+                raise
 
     def already_posted(self, ticket_sequence):
         """Dedupe check: does an account.move with this ticket_sequence exist already?"""
