@@ -148,7 +148,13 @@ def pick_latest_parking(items: list, folder_path: str = "") -> dict:
             f"'{folder_path}'. Files seen: {preview}."
         )
     candidates.sort(key=lambda i: i.get("lastModifiedDateTime", ""), reverse=True)
-    return candidates[0]
+    selected = candidates[0]
+
+    # Gate 1: Filename Date Freshness Validation
+    from validator import validate_filename_freshness
+    validate_filename_freshness(selected["name"])
+
+    return selected
 
 
 def download_file(item: dict, dest_path: str) -> str:

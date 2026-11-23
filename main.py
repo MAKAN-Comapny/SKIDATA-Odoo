@@ -59,6 +59,13 @@ def main():
     )
 
     print("\n" + "=" * 70)
+    print("Validation Gate: Verifying Downloaded Report (Integrity & Yesterday Data)...")
+    print("=" * 70)
+    from validator import validate_parking_report_content
+    val_res = validate_parking_report_content(raw_path)
+    print(f"Validation PASSED [OK]: {val_res.summary}")
+
+    print("\n" + "=" * 70)
     print("Step 2/3: Transforming for Odoo & Generating SQL MERGE Audit...")
     print("=" * 70)
     transform_exports(seen_tickets=seen_tickets)
