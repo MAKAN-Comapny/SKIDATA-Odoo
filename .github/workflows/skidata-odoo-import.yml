@@ -7,9 +7,12 @@ on:
   #   - cron: "50 6 * * *"
   #   # Run 2: 10:00 UTC = 01:00 PM Saudi Time (AST) / 03:30 PM IST (1 hr after midday scraper)
   #   - cron: "0 10 * * *"
-  repository_dispatch:
-    # External cron (cron-job.org) trigger support
-    types: [odoo-import]
+
+  # repository_dispatch:
+  #   # PAUSED: Disabled so Yogesh cron-job.org triggers cannot call legacy 1-day Odoo import.
+  #   # Odoo import is now handled by the 15-day rolling pipeline on feature/5-days-rolling.
+  #   types: [odoo-import]
+
   workflow_dispatch:
     # Manual run from GitHub Actions tab
     inputs:
@@ -26,8 +29,19 @@ jobs:
   import-to-odoo:
     runs-on: ubuntu-latest
     timeout-minutes: 180
+    # PAUSED: Guardrail against unintentional manual triggers.
+    # Set to true only if emergency legacy 1-day fallback is ever required.
+    if: false
 
     steps:
+      - name: Pipeline Paused Guard
+        run: |
+          echo "=========================================================================="
+          echo "PIPELINE PAUSED: Legacy 1-Day Odoo Import on 'main' is deactivated."
+          echo "Odoo imports are now managed by the 15-day rolling pipeline on 'feature/5-days-rolling'."
+          echo "=========================================================================="
+          exit 0
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -48,7 +62,6 @@ jobs:
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
           SHAREPOINT_SITE_NAME: ${{ secrets.SHAREPOINT_SITE_NAME }}
-          # Transformed *-Odoo.xlsx folder (NOT Skidata_Daily_Files)
           TARGET_FOLDER_PATH_ODOO: ${{ secrets.TARGET_FOLDER_PATH_ODOO }}
           TARGET_FOLDER_PATH: ${{ secrets.TARGET_FOLDER_PATH_ODOO }}
           ODOO_URL: ${{ secrets.ODOO_URL }}
