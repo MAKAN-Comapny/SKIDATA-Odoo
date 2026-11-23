@@ -191,8 +191,30 @@ def fetch_previous_seen_tickets(
             and "audit" not in i.get("name", "").lower() and "summary" not in i.get("name", "").lower()
         ]
         if not odoo_files:
-            print(f"No previous *-Odoo.xlsx files found in '{dest_folder}'. First test run.")
-            return seen_tickets
+            # Fallback to dest_folder/old/ in case previous files were archived
+            print(f"Notice: No active *-Odoo.xlsx files in root '{dest_folder}'. Checking '{dest_folder}/old'...")
+            archive_items = list_folder_files(headers, site_id, f"{dest_folder}/old")
+            candidate_files = []
+            for it in archive_items:
+                if "file" in it and it.get("name", "").lower().endswith((".xlsx", ".xlsm")):
+                    name_l = it.get("name", "").lower()
+                    if "-odoo" in name_l and "audit" not in name_l and "summary" not in name_l:
+                        candidate_files.append(it)
+                elif "folder" in it:
+                    sub_items = list_folder_files(headers, site_id, f"{dest_folder}/old/{it['name']}")
+                    for sit in sub_items:
+                        if "file" in sit and sit.get("name", "").lower().endswith((".xlsx", ".xlsm")):
+                            name_sl = sit.get("name", "").lower()
+                            if "-odoo" in name_sl and "audit" not in name_sl and "summary" not in name_sl:
+                                candidate_files.append(sit)
+
+            if candidate_files:
+                candidate_files.sort(key=lambda i: i.get("lastModifiedDateTime", ""), reverse=True)
+                odoo_files = candidate_files
+                print(f"Found {len(odoo_files)} previous run file(s) in '{dest_folder}/old'.")
+            else:
+                print(f"No previous *-Odoo.xlsx files found in '{dest_folder}' or '{dest_folder}/old'. First test run.")
+                return seen_tickets
 
         # Sort newest first
         odoo_files.sort(key=lambda i: i.get("lastModifiedDateTime", ""), reverse=True)
