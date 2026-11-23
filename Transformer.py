@@ -556,6 +556,12 @@ def run(seen_tickets: Optional[set] = None):
             "Run download first."
         )
 
+    # Clean previous run artifacts in Cleaned-Exports to prevent stale file pickups
+    if os.path.exists(CLEANED_EXPORTS_DIR):
+        for old in os.listdir(CLEANED_EXPORTS_DIR):
+            fp = os.path.join(CLEANED_EXPORTS_DIR, old)
+            if os.path.isfile(fp):
+                os.remove(fp)
     os.makedirs(CLEANED_EXPORTS_DIR, exist_ok=True)
 
     for src in parking_files:

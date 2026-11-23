@@ -228,14 +228,16 @@ def upload_cleaned_files(dest_folder: str | None = None) -> list[str]:
     print(f"Ensuring folder path exists: {folder_to_use}")
     ensure_folder_path(site_id, headers, folder_to_use)
 
-    print(f"Uploading {len(files)} file(s) to '{folder_to_use}'...")
+    keep_local = os.getenv("KEEP_LOCAL_CLEANED", "true").lower() in ("true", "1", "yes")
+    print(f"Uploading {len(files)} file(s) to '{folder_to_use}' (KEEP_LOCAL_CLEANED={keep_local})...")
     uploaded = []
     for fp in files:
         try:
             result = upload_file(site_id, headers, fp, folder_path=folder_to_use)
             print(f"  OK: {os.path.basename(fp)} -> {result.get('webUrl', 'uploaded')}")
             uploaded.append(fp)
-            os.remove(fp)
+            if not keep_local:
+                os.remove(fp)
         except requests.RequestException as e:
             print(f"  FAIL: {os.path.basename(fp)} - {e}")
             raise

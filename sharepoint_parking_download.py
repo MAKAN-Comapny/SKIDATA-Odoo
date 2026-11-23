@@ -93,19 +93,21 @@ def list_folder_files(headers: dict, site_id: str, folder_path: str) -> list:
 
 
 def target_date_prefixes() -> list[str]:
-    """TARGET_DATE=YYYY-MM-DD selects that day's file by name, e.g. '20-Oct-26-' or '20-Oct-2026-'."""
+    """TARGET_DATE=YYYY-MM-DD or DD-Mon-YY selects that day's file by name, e.g. '20-Oct-26-' or '20-Oct-2026-'."""
     raw = os.getenv("TARGET_DATE", "").strip()
     if not raw:
         return []
-    try:
-        dt = datetime.strptime(raw, "%Y-%m-%d")
-        return [
-            dt.strftime("%d-%b-%y") + "-",
-            dt.strftime("%d-%b-%Y") + "-",
-            dt.strftime("%Y-%m-%d") + "-",
-        ]
-    except ValueError:
-        return [raw + "-"]
+    for fmt in ("%Y-%m-%d", "%d-%b-%y", "%d-%b-%Y"):
+        try:
+            dt = datetime.strptime(raw, fmt)
+            return [
+                dt.strftime("%d-%b-%y") + "-",
+                dt.strftime("%d-%b-%Y") + "-",
+                dt.strftime("%Y-%m-%d") + "-",
+            ]
+        except ValueError:
+            pass
+    return [raw + "-"]
 
 
 def pick_latest_parking(items: list, folder_path: str = "") -> dict:
@@ -114,19 +116,23 @@ def pick_latest_parking(items: list, folder_path: str = "") -> dict:
     Newest by lastModifiedDateTime, or with TARGET_DATE set, the file matching that day.
     """
     prefixes = target_date_prefixes()
-    names = [i.get("name", "") for i in items if i.get("file")]
+    run_tag = os.getenv("RUN_TAG", "").strip().lower()
+    names = [i.get("name", "") for i in items if "file" in i]
     candidates = []
     for item in items:
-        if not item.get("file"):
+        if "file" not in item:
             continue
         name = item.get("name", "")
-        if not name.lower().endswith((".xlsx", ".xlsm")):
+        name_lower = name.lower()
+        if not name_lower.endswith((".xlsx", ".xlsm")):
             continue
-        if PARKING_MARKER not in name:
+        if PARKING_MARKER.lower() not in name_lower:
             continue
-        if "odoo" in name.lower() or "audit" in name.lower() or "summary" in name.lower():
+        if "odoo" in name_lower or "audit" in name_lower or "summary" in name_lower:
             continue
-        if prefixes and not any(p.rstrip("-").lower() in name.lower() for p in prefixes):
+        if prefixes and not any(p.rstrip("-").lower() in name_lower for p in prefixes):
+            continue
+        if run_tag and run_tag not in ("none", "all", "false") and run_tag not in name_lower:
             continue
         candidates.append(item)
 
@@ -176,7 +182,7 @@ def fetch_previous_seen_tickets(
             if i.get("file")
             and i.get("name", "").lower().endswith((".xlsx", ".xlsm"))
             and "-odoo" in i.get("name", "").lower()
-            and "audit" not in i.get("name", "").lower()
+            and "audit" not in i.get("name", "").lower() and "summary" not in i.get("name", "").lower()
         ]
         if not odoo_files:
             print(f"No previous *-Odoo.xlsx files found in '{dest_folder}'. First test run.")
@@ -249,7 +255,7 @@ def fetch_latest_parking_and_seen_tickets(
 
     # 2. Download latest raw Parking Transactions file
     items = list_folder_files(headers, site_id, source)
-    file_names = [i.get("name") for i in items if i.get("file")]
+    file_names = [i.get("name") for i in items if "file" in i]
     print(f"Files found in source ({len(file_names)}): {file_names}")
     latest = pick_latest_parking(items, folder_path=source)
     name = latest["name"]

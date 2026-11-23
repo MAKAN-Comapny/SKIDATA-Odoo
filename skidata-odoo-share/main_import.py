@@ -63,6 +63,12 @@ def run():
         for cdir in cleaned_dirs:
             if cdir and os.path.isdir(cdir):
                 matches = glob.glob(os.path.join(cdir, "*Parking-Transactions-Odoo.xlsx"))
+                # STRICT AUDIT EXCLUSION: Never pick audit or summary files locally
+                matches = [
+                    f for f in matches
+                    if "audit" not in os.path.basename(f).lower()
+                    and "summary" not in os.path.basename(f).lower()
+                ]
                 if matches:
                     matches.sort(key=os.path.getmtime, reverse=True)
                     local_path = matches[0]

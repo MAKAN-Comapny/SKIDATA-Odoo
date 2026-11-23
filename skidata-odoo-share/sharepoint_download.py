@@ -97,31 +97,52 @@ def list_folder_files(headers, site_id, folder_path):
     return r.json().get("value", [])
 
 
-def target_date_prefix():
-    """TARGET_DATE=YYYY-MM-DD selects that day's *-Odoo file by name, e.g. '20-Oct-26-'."""
+def target_date_prefixes():
+    """TARGET_DATE=YYYY-MM-DD or DD-Mon-YY selects that day's *-Odoo file by name."""
     raw = os.getenv("TARGET_DATE", "").strip()
     if not raw:
-        return None
-    return datetime.strptime(raw, "%Y-%m-%d").strftime("%d-%b-%y") + "-"
+        return []
+    for fmt in ("%Y-%m-%d", "%d-%b-%y", "%d-%b-%Y"):
+        try:
+            dt = datetime.strptime(raw, fmt)
+            return [
+                dt.strftime("%d-%b-%y") + "-",
+                dt.strftime("%d-%b-%Y") + "-",
+                dt.strftime("%Y-%m-%d") + "-",
+            ]
+        except ValueError:
+            pass
+    return [raw + "-"]
 
 
 def pick_latest_export(items):
-    prefix = target_date_prefix()
-    candidates = [
-        item
-        for item in items
-        if item.get("file")
-        and item.get("name", "").lower().endswith((".xlsx", ".csv"))
-        and any(marker.lower() in item["name"].lower() for marker in FILENAME_MARKERS)
-        and (
-            not prefix
-            or item["name"].startswith(prefix)
-            or (prefix.rstrip("-").lower() in item["name"].lower())
-        )
-    ]
+    prefixes = target_date_prefixes()
+    run_tag = os.getenv("RUN_TAG", "").strip().lower()
+    candidates = []
+    for item in items:
+        if "file" not in item:
+            continue
+        name = item.get("name", "")
+        name_lower = name.lower()
+        if not name_lower.endswith((".xlsx", ".csv")):
+            continue
+        # STRICT AUDIT EXCLUSION: Never pick audit or summary files
+        if "audit" in name_lower or "summary" in name_lower:
+            continue
+        # Must match transformed Odoo marker
+        if not any(marker.lower() in name_lower for marker in FILENAME_MARKERS):
+            continue
+        # Date filter if TARGET_DATE is set
+        if prefixes and not any(p.rstrip("-").lower() in name_lower for p in prefixes):
+            continue
+        # Optional run period tag filter (Morning, Evening, 12Noon)
+        if run_tag and run_tag not in ("none", "all", "false") and run_tag not in name_lower:
+            continue
+        candidates.append(item)
+
     if not candidates:
-        names = [i.get("name") for i in items if i.get("file")]
-        print(f"No *-Parking-Transactions-Odoo* file found. Files seen: {names}")
+        names = [i.get("name") for i in items if "file" in i]
+        print(f"No valid *-Parking-Transactions-Odoo* file found (excluding audits). Files seen: {names}")
         return None
     candidates.sort(key=lambda i: i.get("lastModifiedDateTime", ""), reverse=True)
     return candidates[0]
