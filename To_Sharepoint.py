@@ -220,6 +220,9 @@ def upload_cleaned_files(dest_folder: str | None = None) -> list[str]:
             "Run Transformer.py first."
         )
 
+    # CRITICAL PRIORITY: Upload the core Odoo file FIRST before any auxiliary audit files
+    files.sort(key=lambda f: (0 if ODOO_FILE_MARKER in os.path.basename(f) else 1))
+
     print("Getting access token...")
     token = get_access_token()
     headers = {"Authorization": f"Bearer {token}"}
@@ -234,15 +237,20 @@ def upload_cleaned_files(dest_folder: str | None = None) -> list[str]:
     print(f"Uploading {len(files)} file(s) to '{folder_to_use}' (KEEP_LOCAL_CLEANED={keep_local})...")
     uploaded = []
     for fp in files:
+        is_audit = "audit" in os.path.basename(fp).lower() or "summary" in os.path.basename(fp).lower()
         try:
             result = upload_file(site_id, headers, fp, folder_path=folder_to_use)
             print(f"  OK: {os.path.basename(fp)} -> {result.get('webUrl', 'uploaded')}")
             uploaded.append(fp)
             if not keep_local:
                 os.remove(fp)
-        except requests.RequestException as e:
-            print(f"  FAIL: {os.path.basename(fp)} - {e}")
-            raise
+        except Exception as e:
+            if is_audit:
+                print(f"  [WARNING] Non-critical Audit file upload failed for {os.path.basename(fp)}: {e}")
+                print("  Proceeding pipeline: core Odoo transaction file upload is prioritized.")
+            else:
+                print(f"  FAIL: Critical Odoo file upload failed: {os.path.basename(fp)} - {e}")
+                raise
 
     print(f"Uploaded {len(uploaded)} file(s) successfully to '{folder_to_use}'.")
     return uploaded

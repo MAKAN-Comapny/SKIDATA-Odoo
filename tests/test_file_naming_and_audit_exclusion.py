@@ -210,6 +210,40 @@ class TestFileNamingAndAuditExclusion(unittest.TestCase):
         selected = sharepoint_download.pick_latest_export(items)
         self.assertEqual(selected["name"], "22-Nov-26-Evening-Parking-Transactions-Odoo.xlsx")
 
+    # -------------------------------------------------------------------------
+    # 5. Fault-Tolerance: Audit Generation / Upload Failure Does NOT Fail Pipeline
+    # -------------------------------------------------------------------------
+    def test_audit_failure_does_not_halt_odoo_pipeline(self):
+        """
+        If the auxiliary Audit Summary Excel file fails to generate or upload,
+        the pipeline MUST NOT crash. The core Odoo transaction file is paramount.
+        """
+        from unittest.mock import patch
+        import Transformer
+
+        # Simulate _write_audit_report throwing an unhandled error
+        with patch.object(Transformer, "_write_audit_report", side_effect=RuntimeError("Disk full or openpyxl crash")):
+            with patch.object(Transformer, "_write_odoo_excel") as mock_write_odoo:
+                # Mock a small dataframe
+                import pandas as pd
+                mock_df = pd.DataFrame([{
+                    "Serial Number": "3280198601",
+                    "Receipt Number": "79374",
+                    "Payment": 20.0,
+                    "Transaction Date/Time": "2026-11-23 10:00:00",
+                    "Article": "Short-term Parker",
+                    "Entry Date / Time": "2026-11-23 09:00:00",
+                    "Exit Date / Time": "2026-11-23 10:00:00",
+                    "Entry Plate Number": "ABC 1234",
+                    "Exit Plate Number": "ABC 1234",
+                    "Car Park": "Mall of Dhahran",
+                }])
+                with patch("pandas.read_excel", return_value=mock_df):
+                    # Calling transform_parking_file should complete gracefully without raising!
+                    res = Transformer.transform_parking_file("mock_src.xlsx", "mock_dest-Odoo.xlsx")
+                    self.assertIsNotNone(res)
+                    self.assertTrue(mock_write_odoo.called, "Core Odoo excel file MUST be written even if audit fails!")
+
 
 if __name__ == "__main__":
     unittest.main()
