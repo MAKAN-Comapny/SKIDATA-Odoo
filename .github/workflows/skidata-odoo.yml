@@ -1,17 +1,10 @@
 name: SKIDATA-Odoo Parking Pipeline
 
 on:
-  # schedule:
-  #   # Disabled in favor of reliable external cron-job.org triggers (avoids GitHub Actions queue delay)
-  #   # Run 1: 05:30 UTC = 08:30 AM Saudi Time (AST) - After morning 15-day scraper
-  #   - cron: "30 5 * * *"
-  #   # Run 2: 10:15 UTC = 01:15 PM Saudi Time (AST) - After midday 15-day scraper
-  #   - cron: "15 10 * * *"
   workflow_dispatch:
-    # Manual run from GitHub Actions tab
     inputs:
       mode:
-        description: "Mode: '5days_rolling' (test 5-day rolling), 'daily', or 'aug_sep_historical'"
+        description: "Mode: '5days_rolling' (15/5-day rolling), 'daily', or 'aug_sep_historical'"
         required: false
         default: "5days_rolling"
       target_date:
@@ -23,13 +16,17 @@ on:
         required: false
         default: "Ski Data 5"
       target_folder_odoo:
-        description: "Destination folder (defaults to 'Odoo_testing_Sumit')"
+        description: "Destination folder for transformed Excel (defaults to 'Odoo_testing_Sumit')"
         required: false
         default: "Odoo_testing_Sumit"
-  # Disabled: redundant step because SKIDATA_SCRAPER already generates
-  # and uploads the transformed Odoo file directly.
-  # repository_dispatch:
-  #   types: [manual-trigger]
+      import_to_odoo:
+        description: "Import new tickets into Odoo ERP (true/false)"
+        required: false
+        default: "true"
+
+  repository_dispatch:
+    # External cron (cron-job.org) trigger support
+    types: [skidata-odoo-pipeline]
 
 concurrency:
   group: skidata-odoo
@@ -38,7 +35,7 @@ concurrency:
 jobs:
   run-pipeline:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 180
 
     steps:
       - name: Checkout repository
@@ -55,8 +52,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install -r skidata-odoo-share/requirements.txt
 
-      - name: Run Parking Transactions pipeline
+      - name: Run Parking Transactions pipeline (Transform & Archive to SharePoint)
         env:
           UPLOAD_TO_SHAREPOINT: "true"
           TARGET_DATE: ${{ inputs.target_date }}
@@ -77,3 +75,27 @@ jobs:
           else
             python main.py
           fi
+
+      - name: Smart Import to Odoo ERP (Fast Batch Dedupe + Post & Pay New)
+        if: ${{ inputs.import_to_odoo != 'false' }}
+        working-directory: skidata-odoo-share
+        env:
+          TENANT_ID: ${{ secrets.TENANT_ID }}
+          CLIENT_ID: ${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+          SHAREPOINT_SITE_NAME: ${{ secrets.SHAREPOINT_SITE_NAME }}
+          TARGET_FOLDER_PATH_ODOO: ${{ inputs.target_folder_odoo || 'Odoo_testing_Sumit' }}
+          TARGET_FOLDER_PATH: ${{ inputs.target_folder_odoo || 'Odoo_testing_Sumit' }}
+          ODOO_URL: ${{ secrets.ODOO_URL }}
+          ODOO_DB: ${{ secrets.ODOO_DB }}
+          ODOO_USERNAME: ${{ secrets.ODOO_USERNAME }}
+          ODOO_API_KEY: ${{ secrets.ODOO_API_KEY }}
+          ODOO_JOURNAL_ID: ${{ secrets.ODOO_JOURNAL_ID }}
+          ODOO_SALES_ACCOUNT_ID: ${{ secrets.ODOO_SALES_ACCOUNT_ID }}
+          ODOO_TAX_ID: ${{ secrets.ODOO_TAX_ID }}
+          ODOO_WALKIN_PARTNER_ID: ${{ secrets.ODOO_WALKIN_PARTNER_ID }}
+          ODOO_PAYMENT_JOURNAL_ID: ${{ secrets.ODOO_PAYMENT_JOURNAL_ID }}
+          ODOO_POST: "true"
+          ODOO_PAY: "true"
+          IMPORT_LIMIT: ${{ secrets.IMPORT_LIMIT }}
+        run: python main_import.py

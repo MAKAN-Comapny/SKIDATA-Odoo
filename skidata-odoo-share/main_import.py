@@ -1,8 +1,9 @@
 """
-Unattended SharePoint -> Odoo draft import.
+Unattended SharePoint / Local Cleaned-Exports -> Odoo draft import.
 
 Used by GitHub Actions / cron. No interactive prompt.
 """
+import glob
 import os
 import sys
 import time
@@ -38,15 +39,45 @@ def run():
 
     action_desc = "POSTED + PAID" if pay else "POSTED" if post else "DRAFT"
     print("=" * 64)
-    print(f"SKIDATA-Odoo import: SharePoint latest file -> Odoo ({action_desc})")
+    print(f"SKIDATA-Odoo import: Latest file -> Odoo ({action_desc})")
     print("=" * 64)
 
-    dest_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "downloads")
-    local_path, item, folder = sharepoint_download.fetch_latest_export(dest_dir=dest_dir)
+    local_path = None
+    folder = None
+    item = {}
+
+    # 1. Check for explicit file override
+    explicit_file = os.getenv("INPUT_FILE", "").strip()
+    if explicit_file and os.path.isfile(explicit_file):
+        local_path = os.path.abspath(explicit_file)
+        folder = "Local (INPUT_FILE)"
+        item = {"name": os.path.basename(local_path), "lastModifiedDateTime": "local"}
+    else:
+        # 2. Check for locally generated transformed files (from main.py step)
+        parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        cleaned_dirs = [
+            os.getenv("CLEANED_EXPORTS_DIR", "").strip(),
+            os.path.join(parent_dir, "Cleaned-Exports"),
+            os.path.abspath("Cleaned-Exports"),
+        ]
+        for cdir in cleaned_dirs:
+            if cdir and os.path.isdir(cdir):
+                matches = glob.glob(os.path.join(cdir, "*Parking-Transactions-Odoo.xlsx"))
+                if matches:
+                    matches.sort(key=os.path.getmtime, reverse=True)
+                    local_path = matches[0]
+                    folder = f"Local ({cdir})"
+                    item = {"name": os.path.basename(local_path), "lastModifiedDateTime": "local"}
+                    break
+
+    # 3. Fallback to downloading from SharePoint
     if local_path is None:
-        print("No matching export found in SharePoint.")
-        print("Tried folders:", folder)
-        sys.exit(1)
+        dest_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "downloads")
+        local_path, item, folder = sharepoint_download.fetch_latest_export(dest_dir=dest_dir)
+        if local_path is None:
+            print("No matching export found in SharePoint or Cleaned-Exports.")
+            print("Tried folders:", folder)
+            sys.exit(1)
 
     print(f"Folder : {folder}")
     print(f"File   : {item.get('name')}")
