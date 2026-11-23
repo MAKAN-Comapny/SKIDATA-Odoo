@@ -1,6 +1,6 @@
 """
 Upload transformed Parking Transactions (*-Odoo.xlsx) from Cleaned-Exports/
-to Microsoft SharePoint folder TARGET_FOLDER_PATH_ODOO (default: Odoo_testing_Sumit for dev).
+to Microsoft SharePoint folder TARGET_FOLDER_PATH_ODOO (default: SKIDATA - Odoo).
 
 Run Transformer.py (or main.py) first so Cleaned-Exports/ is populated.
 
@@ -20,11 +20,11 @@ CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 SITE_NAME = os.getenv("SHAREPOINT_SITE_NAME")
 # Destination for transformed *-Odoo.xlsx (NOT the raw daily folder).
-# dev branch defaults to Odoo_testing_Sumit for isolated staging.
+# Defaults to SKIDATA - Odoo.
 TARGET_FOLDER_PATH = (
     os.getenv("TARGET_FOLDER_PATH_ODOO")
     or os.getenv("ODOO_SHAREPOINT_FOLDER")
-    or "Odoo_testing_Sumit"
+    or "SKIDATA - Odoo"
 ).strip()
 
 CLEANED_EXPORTS_DIR = "Cleaned-Exports"
@@ -175,9 +175,11 @@ def upload_cleaned_files(dest_folder: str | None = None) -> list[str]:
         or TARGET_FOLDER_PATH
     ).strip()
 
-    if folder_to_use in {"SKIDATA - Odoo", "Skidata_Daily_Files", "Ski-data-daily"}:
-        print(f"SAFETY GUARDRAIL: Blocked upload to '{folder_to_use}' on test branch. Redirecting to 'Odoo_testing_Sumit'.")
-        folder_to_use = "Odoo_testing_Sumit" 
+    if folder_to_use in {"Skidata_Daily_Files", "Ski-data-daily", "Ski Data 5"}:
+        raise RuntimeError(
+            f"SAFETY GUARDRAIL: Blocked upload to raw source folder '{folder_to_use}'! "
+            "Transformed Odoo files must go to 'SKIDATA - Odoo'."
+        )
 
     missing = [
         k

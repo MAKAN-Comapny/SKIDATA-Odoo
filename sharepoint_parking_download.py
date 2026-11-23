@@ -166,7 +166,7 @@ def download_file(item: dict, dest_path: str) -> str:
 def fetch_previous_seen_tickets(
     headers: dict,
     site_id: str,
-    dest_folder: str = "Odoo_testing_Sumit",
+    dest_folder: str = "SKIDATA - Odoo",
     temp_dir: str = "exports/previous_runs",
 ) -> set[str]:
     """
@@ -241,7 +241,7 @@ def fetch_latest_parking_and_seen_tickets(
     dest = (
         dest_folder
         or os.getenv("TARGET_FOLDER_PATH_ODOO")
-        or "Odoo_testing_Sumit"
+        or "SKIDATA - Odoo"
     ).strip()
 
     print(f"SharePoint source folder:      {source}")

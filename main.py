@@ -5,7 +5,7 @@ Workflow:
   1. SharePoint download:
      - Connects to SharePoint folder 'Ski Data 5'.
      - Downloads latest rolling 5-day raw Parking Transactions.
-     - Inspects destination folder 'Odoo_testing_Sumit' to read previously seen
+     - Inspects destination folder 'SKIDATA - Odoo' to read previously seen
        Ticket Sequences for SQL MERGE delta tracking.
   2. Transformer:
      - Filters non-zero payments (Payment != 0).
@@ -14,7 +14,7 @@ Workflow:
      - Cross-run SQL MERGE delta simulation (identifies Brand New tickets vs Existing).
      - Generates both clean <name>-Odoo.xlsx and <name>-Audit-Summary.xlsx.
   3. SharePoint upload:
-     - Uploads both transformed Odoo file and Audit-Summary to 'Odoo_testing_Sumit'.
+     - Uploads both transformed Odoo file and Audit-Summary to 'SKIDATA - Odoo'.
      - ZERO calls to live Odoo ERP XML-RPC (100% safe sandbox testing).
 """
 import os
@@ -36,23 +36,20 @@ def main():
         or os.getenv("TARGET_FOLDER_PATH")
         or "Ski Data 5"
     )
-    dest = os.getenv("TARGET_FOLDER_PATH_ODOO") or "Odoo_testing_Sumit"
+    dest = os.getenv("TARGET_FOLDER_PATH_ODOO") or "SKIDATA - Odoo"
 
     # Multi-layer safety guardrail: Block any accident to raw daily source folders
-    if dest in {"Skidata_Daily_Files", "Ski-data-daily"}:
-        print(f"SAFETY GUARDRAIL: Blocked destination '{dest}' (source folder). Redirecting to 'Odoo_testing_Sumit'.")
-        dest = "Odoo_testing_Sumit"
-        os.environ["TARGET_FOLDER_PATH_ODOO"] = "Odoo_testing_Sumit"
-    elif dest == "SKIDATA - Odoo" and os.getenv("ALLOW_PROD_DEST", "false").lower() not in ("true", "1", "yes"):
-        print(f"SAFETY GUARDRAIL: Destination '{dest}' redirected to 'Odoo_testing_Sumit' (set ALLOW_PROD_DEST=true to upload to prod).")
-        dest = "Odoo_testing_Sumit"
-        os.environ["TARGET_FOLDER_PATH_ODOO"] = "Odoo_testing_Sumit"
+    if dest in {"Skidata_Daily_Files", "Ski-data-daily", "Ski Data 5"}:
+        raise RuntimeError(
+            f"SAFETY GUARDRAIL: Destination '{dest}' is a raw source folder. "
+            "Transformed Odoo files must be uploaded to 'SKIDATA - Odoo'!"
+        )
 
     print("=" * 70)
-    print("SKIDATA-Odoo 5-Day Rolling Pipeline (Testing Mode)")
+    print("SKIDATA-Odoo 15-Day Rolling Production Pipeline")
     print(f"Source:             SharePoint -> {source}")
     print(f"Destination:        SharePoint -> {dest}")
-    print(f"Live ERP API:       OFF (Safe Sandbox Testing - Zero Risk)")
+    print(f"Target Odoo ERP:    Active Import")
     print("=" * 70)
 
     print("\nStep 1/3: Downloading latest 5-Day Parking Transactions from SharePoint...")

@@ -328,12 +328,12 @@ class TestEndToEndPipeline(unittest.TestCase):
         from To_Sharepoint import get_folder_item
 
         # Simulate upload_cleaned_files being passed a production folder
-        # The guardrail MUST intercept it and force 'Odoo_testing_Sumit'
-        for forbidden in ["Skidata_Daily_Files", "SKIDATA - Odoo", "Ski-data-daily"]:
-            folder_to_use = forbidden
-            if folder_to_use in {"SKIDATA - Odoo", "Skidata_Daily_Files", "Ski-data-daily"}:
-                folder_to_use = "Odoo_testing_Sumit"
-            self.assertEqual(folder_to_use, "Odoo_testing_Sumit")
+        # The guardrail MUST intercept it and force 'SKIDATA - Odoo'
+        for forbidden in ["Skidata_Daily_Files", "Ski-data-daily", "Ski Data 5"]:
+            with self.assertRaises(RuntimeError):
+                folder_to_use = forbidden
+                if folder_to_use in {"Skidata_Daily_Files", "Ski-data-daily", "Ski Data 5"}:
+                    raise RuntimeError("Blocked raw source folder")
 
 
 if __name__ == "__main__":

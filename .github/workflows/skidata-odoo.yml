@@ -20,9 +20,9 @@ on:
         required: false
         default: "Ski Data 5"
       target_folder_odoo:
-        description: "Destination folder for transformed Excel (defaults to 'Odoo_testing_Sumit')"
+        description: "Destination folder for transformed Excel (defaults to 'SKIDATA - Odoo')"
         required: false
-        default: "Odoo_testing_Sumit"
+        default: "SKIDATA - Odoo"
       import_to_odoo:
         description: "Import new tickets into Odoo ERP (true/false)"
         required: false
@@ -69,7 +69,7 @@ jobs:
           SHAREPOINT_SITE_NAME: ${{ secrets.SHAREPOINT_SITE_NAME }}
           SHAREPOINT_SOURCE_FOLDER: ${{ inputs.source_folder || 'Ski Data 5' }}
           TARGET_FOLDER_PATH: ${{ inputs.source_folder || 'Ski Data 5' }}
-          TARGET_FOLDER_PATH_ODOO: ${{ inputs.target_folder_odoo || 'Odoo_testing_Sumit' }}
+          TARGET_FOLDER_PATH_ODOO: ${{ inputs.target_folder_odoo || 'SKIDATA - Odoo' }}
         run: |
           if [ "${{ inputs.mode }}" = "aug_sep_historical" ]; then
             if [ -n "${{ inputs.source_folder }}" ] && [ "${{ inputs.source_folder }}" != "Ski Data 5" ]; then
@@ -89,8 +89,8 @@ jobs:
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
           SHAREPOINT_SITE_NAME: ${{ secrets.SHAREPOINT_SITE_NAME }}
-          TARGET_FOLDER_PATH_ODOO: ${{ inputs.target_folder_odoo || 'Odoo_testing_Sumit' }}
-          TARGET_FOLDER_PATH: ${{ inputs.target_folder_odoo || 'Odoo_testing_Sumit' }}
+          TARGET_FOLDER_PATH_ODOO: ${{ inputs.target_folder_odoo || 'SKIDATA - Odoo' }}
+          TARGET_FOLDER_PATH: ${{ inputs.target_folder_odoo || 'SKIDATA - Odoo' }}
           ODOO_URL: ${{ secrets.ODOO_URL }}
           ODOO_DB: ${{ secrets.ODOO_DB }}
           ODOO_USERNAME: ${{ secrets.ODOO_USERNAME }}
