@@ -60,16 +60,16 @@ def find_parking_file_item(items: list, folder_path: str) -> dict:
     """Find the Parking Transactions file in the SharePoint folder."""
     candidates = []
     for item in items:
-        if not item.get("file"):
+        if "file" not in item:
             continue
         name = item.get("name", "")
         if not name.lower().endswith((".xlsx", ".xlsm")):
             continue
-        if "parking-transactions" in name.lower() and "odoo" not in name.lower():
+        if "parking-transactions" in name.lower() and "odoo" not in name.lower() and "audit" not in name.lower() and "summary" not in name.lower():
             candidates.append(item)
 
     if not candidates:
-        all_names = [i.get("name", "") for i in items if i.get("file")]
+        all_names = [i.get("name", "") for i in items if "file" in i]
         raise RuntimeError(
             f"No 'Parking-Transactions' .xlsx file found in SharePoint folder '{folder_path}'.\n"
             f"Files found: {all_names or '(empty)'}"

@@ -179,7 +179,7 @@ def fetch_previous_seen_tickets(
         odoo_files = [
             i
             for i in items
-            if i.get("file")
+            if "file" in i
             and i.get("name", "").lower().endswith((".xlsx", ".xlsm"))
             and "-odoo" in i.get("name", "").lower()
             and "audit" not in i.get("name", "").lower() and "summary" not in i.get("name", "").lower()

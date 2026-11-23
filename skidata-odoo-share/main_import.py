@@ -60,14 +60,19 @@ def run():
             os.path.join(parent_dir, "Cleaned-Exports"),
             os.path.abspath("Cleaned-Exports"),
         ]
+        prefixes = sharepoint_download.target_date_prefixes()
+        run_tag = os.getenv("RUN_TAG", "").strip().lower()
         for cdir in cleaned_dirs:
             if cdir and os.path.isdir(cdir):
                 matches = glob.glob(os.path.join(cdir, "*Parking-Transactions-Odoo.xlsx"))
-                # STRICT AUDIT EXCLUSION: Never pick audit or summary files locally
+                # STRICT AUDIT EXCLUSION & FILTERING:
                 matches = [
-                    f for f in matches
+                    f
+                    for f in matches
                     if "audit" not in os.path.basename(f).lower()
                     and "summary" not in os.path.basename(f).lower()
+                    and (not prefixes or any(p.rstrip("-").lower() in os.path.basename(f).lower() for p in prefixes))
+                    and (not run_tag or run_tag in ("none", "all", "false") or run_tag in os.path.basename(f).lower())
                 ]
                 if matches:
                     matches.sort(key=os.path.getmtime, reverse=True)

@@ -38,9 +38,13 @@ def main():
     )
     dest = os.getenv("TARGET_FOLDER_PATH_ODOO") or "Odoo_testing_Sumit"
 
-    # Multi-layer safety guardrail: Block any accident to production folders
-    if dest in {"SKIDATA - Odoo", "Skidata_Daily_Files", "Ski-data-daily"}:
-        print(f"SAFETY GUARDRAIL: Blocked destination '{dest}' on dev test. Redirecting to 'Odoo_testing_Sumit'.")
+    # Multi-layer safety guardrail: Block any accident to raw daily source folders
+    if dest in {"Skidata_Daily_Files", "Ski-data-daily"}:
+        print(f"SAFETY GUARDRAIL: Blocked destination '{dest}' (source folder). Redirecting to 'Odoo_testing_Sumit'.")
+        dest = "Odoo_testing_Sumit"
+        os.environ["TARGET_FOLDER_PATH_ODOO"] = "Odoo_testing_Sumit"
+    elif dest == "SKIDATA - Odoo" and os.getenv("ALLOW_PROD_DEST", "false").lower() not in ("true", "1", "yes"):
+        print(f"SAFETY GUARDRAIL: Destination '{dest}' redirected to 'Odoo_testing_Sumit' (set ALLOW_PROD_DEST=true to upload to prod).")
         dest = "Odoo_testing_Sumit"
         os.environ["TARGET_FOLDER_PATH_ODOO"] = "Odoo_testing_Sumit"
 
