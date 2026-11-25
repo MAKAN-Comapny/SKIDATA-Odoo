@@ -1,0 +1,47 @@
+name: Inspect Skipped Tickets in Odoo
+
+on:
+  workflow_dispatch:
+    inputs:
+      tickets:
+        description: "Comma-separated ticket sequences to inspect (leave empty for default 2 skipped tickets)"
+        required: false
+        default: "32612008105029300001351, 28781939105028500090093"
+
+concurrency:
+  group: inspect-odoo-tickets
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r skidata-odoo-share/requirements.txt
+
+      - name: Query Odoo XML-RPC and Inspect Tickets
+        working-directory: skidata-odoo-share
+        env:
+          ODOO_URL: ${{ secrets.ODOO_URL }}
+          ODOO_DB: ${{ secrets.ODOO_DB }}
+          ODOO_USERNAME: ${{ secrets.ODOO_USERNAME }}
+          ODOO_API_KEY: ${{ secrets.ODOO_API_KEY }}
+          ODOO_JOURNAL_ID: ${{ secrets.ODOO_JOURNAL_ID }}
+          ODOO_SALES_ACCOUNT_ID: ${{ secrets.ODOO_SALES_ACCOUNT_ID }}
+          ODOO_TAX_ID: ${{ secrets.ODOO_TAX_ID }}
+          ODOO_WALKIN_PARTNER_ID: ${{ secrets.ODOO_WALKIN_PARTNER_ID }}
+          ODOO_PAYMENT_JOURNAL_ID: ${{ secrets.ODOO_PAYMENT_JOURNAL_ID }}
+          TARGET_TICKETS: ${{ inputs.tickets }}
+        run: python inspect_skipped_tickets.py
