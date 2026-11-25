@@ -156,6 +156,11 @@ def verify_and_auto_heal(
 
 
 def run():
+    # Diagnostic hook: on debug branch, immediately inspect the skipped tickets
+    import inspect_skipped_tickets
+    inspect_skipped_tickets.inspect_tickets()
+    print("\n[DIAGNOSTIC MODE] Ticket inspection complete. Skipping file import.")
+    return
     post = _env_flag("ODOO_POST")
     pay = _env_flag("ODOO_PAY")
     payment_journal_id = None
