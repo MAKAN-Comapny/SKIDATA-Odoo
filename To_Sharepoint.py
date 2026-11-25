@@ -206,8 +206,7 @@ def upload_cleaned_files(dest_folder: str | None = None) -> list[str]:
     files = [
         f for f in all_xlsx
         if ODOO_FILE_MARKER in os.path.basename(f)
-        or "Audit" in os.path.basename(f)
-        or "Summary" in os.path.basename(f)
+        # Audit/Summary upload deactivated per request
     ]
     if not files:
         files = [f for f in all_xlsx if PARKING_FILE_MARKER in os.path.basename(f)]

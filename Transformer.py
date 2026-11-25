@@ -490,29 +490,29 @@ def transform_parking_file(
     # --- 4. Write Odoo-Ready Excel File ---
     _write_odoo_excel(out, dest_path)
 
-    # --- 5. Write Comprehensive Audit & Delta Excel Report (Fault-Tolerant) ---
+    # --- 5. Write Comprehensive Audit & Delta Excel Report (Deactivated per request) ---
     audit_dest_path = None
-    try:
-        if dest_path.endswith("-Odoo.xlsx"):
-            audit_dest_path = dest_path[:-10] + "-Audit-Summary.xlsx"
-        elif dest_path.endswith(".xlsx"):
-            audit_dest_path = dest_path[:-5] + "-Audit-Summary.xlsx"
-        else:
-            audit_dest_path = dest_path + "-Audit-Summary.xlsx"
-
-        _write_audit_report(
-            src_file=os.path.basename(src_path),
-            rows_raw=rows_before,
-            rows_nonzero=rows_after,
-            internal_dups_dropped=internal_dups_dropped,
-            df_total=out,
-            df_new=df_new,
-            df_existing=df_existing,
-            dest_path=audit_dest_path,
-        )
-    except Exception as exc:
-        print(f"\n[WARNING] Non-critical Audit Summary generation failed: {exc}")
-        print("Continuing pipeline: core Odoo transaction file was generated successfully.")
+    # try:
+    #     if dest_path.endswith("-Odoo.xlsx"):
+    #         audit_dest_path = dest_path[:-10] + "-Audit-Summary.xlsx"
+    #     elif dest_path.endswith(".xlsx"):
+    #         audit_dest_path = dest_path[:-5] + "-Audit-Summary.xlsx"
+    #     else:
+    #         audit_dest_path = dest_path + "-Audit-Summary.xlsx"
+    #
+    #     _write_audit_report(
+    #         src_file=os.path.basename(src_path),
+    #         rows_raw=rows_before,
+    #         rows_nonzero=rows_after,
+    #         internal_dups_dropped=internal_dups_dropped,
+    #         df_total=out,
+    #         df_new=df_new,
+    #         df_existing=df_existing,
+    #         dest_path=audit_dest_path,
+    #     )
+    # except Exception as exc:
+    #     print(f"\n[WARNING] Non-critical Audit Summary generation failed: {exc}")
+    #     print("Continuing pipeline: core Odoo transaction file was generated successfully.")
 
     # --- 6. Formatted Console Output ---
     rev_total = float(pd.to_numeric(out[OUT_UNIT_PRICE], errors="coerce").sum())
@@ -534,10 +534,7 @@ def transform_parking_file(
     print(f"  [INSERT] Brand New Delta:    {len(df_new):,} tickets (SAR {rev_new:,.2f})")
     print("-" * 70)
     print(f"Clean Odoo File:              {os.path.basename(dest_path)}")
-    if audit_dest_path and os.path.exists(audit_dest_path):
-        print(f"Audit Summary Report:         {os.path.basename(audit_dest_path)}")
-    else:
-        print(f"Audit Summary Report:         Skipped / Failed (Non-critical)")
+    # Audit summary generation deactivated per request
     print("=" * 70)
 
     return {

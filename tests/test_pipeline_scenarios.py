@@ -196,15 +196,9 @@ class TestEndToEndPipeline(unittest.TestCase):
         self.assertEqual(stats["existing_skipped"], 100)
         self.assertEqual(stats["new_delta"], 0)  # ZERO duplicate invoices created!
 
-        # Check Audit Summary Excel
-        audit_file = dest.replace("-Odoo.xlsx", "-Audit-Summary.xlsx")
-        self.assertTrue(os.path.exists(audit_file))
-        audit_metrics = pd.read_excel(audit_file, sheet_name="Audit Metrics")
-        audit_new = pd.read_excel(audit_file, sheet_name="New Tickets (Delta)")
-        audit_skipped = pd.read_excel(audit_file, sheet_name="Existing Tickets (Skipped)")
-
-        self.assertEqual(len(audit_new), 0)
-        self.assertEqual(len(audit_skipped), 100)
+        # Audit Summary Excel generation deactivated per request
+        # audit_file = dest.replace("-Odoo.xlsx", "-Audit-Summary.xlsx")
+        # self.assertTrue(os.path.exists(audit_file))
 
     # -------------------------------------------------------------
     # TEST 4: SQL MERGE Simulation - Rolling 5-Day Overlap (80% Overlap + 20% New)
