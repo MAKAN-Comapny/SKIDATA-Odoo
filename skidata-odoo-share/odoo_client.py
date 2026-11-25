@@ -124,9 +124,10 @@ class OdooClient:
                 else:
                     raise last_exc
 
-    def get_existing_ticket_sequences(self, ticket_sequences, chunk_size=1000):
+    def get_existing_ticket_sequences(self, ticket_sequences, chunk_size=1000, only_posted=True):
         """
         Batch dedupe check: returns a set of ticket_sequences that already exist in Odoo.
+        By default, only checks for 'posted' invoices so interrupted/draft invoices are not falsely skipped.
         Queries Odoo in chunks of chunk_size using 'in' operator to stay well within parameter limits.
         """
         existing = set()
@@ -142,14 +143,17 @@ class OdooClient:
             f"Batch checking {len(unique_sequences)} tickets against Odoo in {total_chunks} chunk(s)..."
         )
 
+        domain_base = [("state", "=", "posted")] if only_posted else []
+
         for idx in range(0, len(unique_sequences), chunk_size):
             chunk = unique_sequences[idx : idx + chunk_size]
             chunk_num = (idx // chunk_size) + 1
+            domain = [("ticket_sequence", "in", chunk)] + domain_base
             try:
                 records = self._execute(
                     "account.move",
                     "search_read",
-                    [("ticket_sequence", "in", chunk)],
+                    domain,
                     ["ticket_sequence"],
                 )
                 for r in records:
@@ -168,11 +172,11 @@ class OdooClient:
         return existing
 
     def already_posted(self, ticket_sequence):
-        """Dedupe check: does an account.move with this ticket_sequence exist already?"""
+        """Dedupe check: does an account.move with this ticket_sequence exist already in posted state?"""
         ids = self._execute(
             "account.move",
             "search",
-            [("ticket_sequence", "=", ticket_sequence)],
+            [("ticket_sequence", "=", ticket_sequence), ("state", "=", "posted")],
             limit=1,
         )
         return bool(ids)
@@ -247,7 +251,21 @@ class OdooClient:
                     results["skipped_duplicate"].append(ticket_sequence)
                     continue
 
-                move_id = self.create_invoice(payload)
+                try:
+                    move_id = self.create_invoice(payload)
+                except Exception as create_exc:
+                    # If invoice was already created in draft, recover its existing move_id
+                    draft_ids = self._execute(
+                        "account.move",
+                        "search",
+                        [("ticket_sequence", "=", ticket_sequence)],
+                        limit=1,
+                    )
+                    if draft_ids:
+                        move_id = draft_ids[0]
+                    else:
+                        raise create_exc
+
                 entry = {
                     "ticket_sequence": ticket_sequence,
                     "move_id": move_id,

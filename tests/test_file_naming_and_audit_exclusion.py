@@ -26,12 +26,12 @@ import sharepoint_parking_download
 class TestFileNamingAndAuditExclusion(unittest.TestCase):
     def setUp(self):
         # Clear env variables before each test
-        for var in ("TARGET_DATE", "RUN_TAG"):
+        for var in ("TARGET_DATE", "RUN_TAG", "ALLOW_STALE_FILE"):
             if var in os.environ:
                 del os.environ[var]
 
     def tearDown(self):
-        for var in ("TARGET_DATE", "RUN_TAG"):
+        for var in ("TARGET_DATE", "RUN_TAG", "ALLOW_STALE_FILE"):
             if var in os.environ:
                 del os.environ[var]
 
@@ -132,6 +132,7 @@ class TestFileNamingAndAuditExclusion(unittest.TestCase):
     # 4. Raw Parking Transactions (sharepoint_parking_download) Exclusions
     # -------------------------------------------------------------------------
     def test_raw_parking_download_excludes_odoo_and_audits(self):
+        os.environ["ALLOW_STALE_FILE"] = "true"
         items = [
             {
                 "file": {},

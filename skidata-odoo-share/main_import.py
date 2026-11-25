@@ -3,6 +3,7 @@ Unattended SharePoint / Local Cleaned-Exports -> Odoo draft import.
 
 Used by GitHub Actions / cron. No interactive prompt.
 """
+import csv
 import glob
 import os
 import sys
@@ -23,6 +24,135 @@ def _import_limit():
 
 def _env_flag(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in ("true", "1", "yes")
+
+
+def verify_and_auto_heal(
+    client,
+    payloads: list,
+    post: bool = False,
+    pay: bool = False,
+    payment_journal_id: int | None = None,
+    max_retries: int = 3,
+    base_backoff: float = 5.0,
+    retry_pacing: float = 0.15,
+    audit_output_dir: str | None = None,
+) -> dict:
+    """
+    Post-Import Verification Gate & Auto-Heal Engine:
+    Queries live Odoo ERP to verify that 100% of transformed ticket sequences
+    exist in the database. If any tickets are missing (due to transient HTTP
+    502/504 gateway drops or database locks), executes targeted retry passes
+    with exponential backoff and pacing until 100% parity is verified or max_retries exhausted.
+    """
+    clean_sequences = [
+        str(p[0]).strip() for p in payloads if p[0] and str(p[0]).strip()
+    ]
+    unique_expected = list(dict.fromkeys(clean_sequences))
+    if not unique_expected:
+        print("\n[Post-Import Gate] No valid ticket sequences to verify.")
+        return {
+            "status": "PASS",
+            "expected_count": 0,
+            "verified_count": 0,
+            "missing_tickets": [],
+            "healed_records": [],
+        }
+
+    print("\n" + "=" * 64)
+    print(f"[Post-Import Gate] Verifying {len(unique_expected)} ticket(s) in live Odoo ERP...")
+    print("=" * 64)
+
+    # 1. Query Odoo for all expected ticket sequences in chunks of 1000
+    confirmed = client.get_existing_ticket_sequences(unique_expected, chunk_size=1000)
+    missing = set(unique_expected) - confirmed
+
+    if not missing:
+        print(f"[Post-Import Gate] PASSED: All {len(unique_expected):,} tickets verified present in Odoo (0 missing).")
+        return {
+            "status": "PASS",
+            "expected_count": len(unique_expected),
+            "verified_count": len(confirmed),
+            "missing_tickets": [],
+            "healed_records": [],
+        }
+
+    print(f"\n[ALERT] Discrepancy detected: {len(missing)} of {len(unique_expected)} ticket(s) MISSING in Odoo!")
+    print(f"Sample missing ticket(s): {list(missing)[:5]}")
+
+    # Build lookup map for fast payload retrieval by ticket sequence
+    payload_map = {}
+    for p in payloads:
+        seq = str(p[0]).strip()
+        if seq in missing and seq not in payload_map:
+            payload_map[seq] = p
+
+    healed_records = []
+
+    # 2. Multi-Pass Auto-Heal Loop
+    for attempt in range(1, max_retries + 1):
+        backoff = base_backoff * attempt
+        print(f"\n[Auto-Heal Pass {attempt}/{max_retries}] Pausing {backoff:.1f}s for gateway recovery...")
+        time.sleep(backoff)
+
+        retry_payloads = [payload_map[seq] for seq in missing if seq in payload_map]
+        print(
+            f"[Auto-Heal Pass {attempt}/{max_retries}] Retrying {len(retry_payloads)} missing ticket(s) (pacing={retry_pacing}s)..."
+        )
+
+        heal_results = client.process_batch(
+            retry_payloads,
+            post=post,
+            pay=pay,
+            payment_journal_id=payment_journal_id,
+            pacing_delay=retry_pacing,
+        )
+        healed_records.extend(heal_results.get("created", []))
+
+        # Re-verify remaining missing tickets against live Odoo
+        reverified = client.get_existing_ticket_sequences(list(missing), chunk_size=1000)
+        newly_healed = missing.intersection(reverified)
+        missing = missing - reverified
+
+        print(
+            f"[Auto-Heal Pass {attempt}/{max_retries}] Result: Recovered {len(newly_healed)} ticket(s). "
+            f"Remaining missing: {len(missing)}."
+        )
+
+        if not missing:
+            print("[Post-Import Gate] AUTO-HEAL COMPLETE: All tickets successfully verified in Odoo ERP.")
+            return {
+                "status": "PASS",
+                "expected_count": len(unique_expected),
+                "verified_count": len(unique_expected),
+                "missing_tickets": [],
+                "healed_records": healed_records,
+            }
+
+    # 3. If tickets remain missing after all auto-heal passes, generate audit file
+    print(f"\n[CRITICAL ERROR] Auto-heal exhausted: {len(missing)} ticket(s) could NOT be ingested into Odoo!")
+
+    out_dir = audit_output_dir or os.getcwd()
+    os.makedirs(out_dir, exist_ok=True)
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    audit_file = os.path.join(out_dir, f"Failed_To_Odoo_{timestamp}.csv")
+    try:
+        with open(audit_file, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["ticket_sequence", "status", "timestamp"])
+            for m_seq in sorted(missing):
+                writer.writerow([m_seq, "MISSING_AFTER_AUTO_HEAL", timestamp])
+        print(f"[Audit Report Generated] Saved missing tickets list to: {audit_file}")
+    except Exception as exc:
+        print(f"Warning: Failed to save audit file: {exc}")
+
+    return {
+        "status": "FAIL",
+        "expected_count": len(unique_expected),
+        "verified_count": len(unique_expected) - len(missing),
+        "missing_tickets": list(missing),
+        "healed_records": healed_records,
+        "audit_file": audit_file,
+    }
 
 
 def run():
@@ -124,35 +254,40 @@ def run():
     skipped = results["skipped_duplicate"]
     failed = results["failed"]
 
-    # If any tickets failed due to transient gateway hiccups, perform a second pass retry
-    if failed:
-        print(f"\n[Retry Pass] Attempting to re-process {len(failed)} failed ticket(s) after 5s recovery pause...")
-        time.sleep(5.0)
-        failed_keys = {item_fail["ticket_sequence"] for item_fail in failed}
-        retry_payloads = [p for p in payloads if p[0] in failed_keys]
-        retry_results = client.process_batch(
-            retry_payloads, post=post, pay=pay, payment_journal_id=payment_journal_id
-        )
-        created.extend(retry_results["created"])
-        skipped.extend(retry_results["skipped_duplicate"])
-        failed = retry_results["failed"]
-        print(f"[Retry Pass] Recovered created: {len(retry_results['created'])}, duplicate: {len(retry_results['skipped_duplicate'])}, remaining failed: {len(failed)}")
+    # 4. Post-Import Verification Gate & Auto-Heal Engine
+    verify_res = verify_and_auto_heal(
+        client=client,
+        payloads=payloads,
+        post=post,
+        pay=pay,
+        payment_journal_id=payment_journal_id,
+        max_retries=3,
+        audit_output_dir=os.path.dirname(local_path) if local_path else None,
+    )
 
-    print("\n=== Results ===")
-    print(f"Created : {len(created)}")
-    print(f"Skipped : {len(skipped)} (already exist)")
-    print(f"Failed  : {len(failed)}")
+    if verify_res.get("healed_records"):
+        created.extend(verify_res["healed_records"])
+
+    final_missing = set(verify_res.get("missing_tickets", []))
+
+    print("\n=== Final Verification Results ===")
+    print(f"Total Unique Expected : {verify_res['expected_count']}")
+    print(f"Verified in Odoo      : {verify_res['verified_count']}")
+    print(f"Created (This Run)    : {len(created)}")
+    print(f"Skipped (Pre-existing): {len(skipped)}")
+    print(f"Permanently Failed    : {len(final_missing)}")
     if created[:5]:
         print("Sample created:", created[:5])
-    if failed[:20]:
-        print("Failures:")
-        for item_fail in failed[:20]:
-            print(f"  - {item_fail}")
+    if final_missing:
+        print("Missing tickets in Odoo:")
+        for m in list(final_missing)[:20]:
+            print(f"  - {m}")
 
-    if failed or build_failed:
+    if verify_res["status"] == "FAIL" or build_failed:
+        print("\n[FAILED] Pipeline halted: One or more tickets failed Odoo verification.")
         sys.exit(1)
 
-    print("Import complete.")
+    print("\nImport complete: 100% verified in Odoo ERP.")
 
 
 if __name__ == "__main__":
