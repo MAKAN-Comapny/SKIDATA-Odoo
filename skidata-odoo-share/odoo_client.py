@@ -124,10 +124,13 @@ class OdooClient:
                 else:
                     raise last_exc
 
-    def get_existing_ticket_sequences(self, ticket_sequences, chunk_size=1000, only_posted=True):
+    def get_existing_ticket_sequences(
+        self, ticket_sequences, chunk_size=1000, only_posted=True, require_paid=False
+    ):
         """
         Batch dedupe check: returns a set of ticket_sequences that already exist in Odoo.
         By default, only checks for 'posted' invoices so interrupted/draft invoices are not falsely skipped.
+        If require_paid=True, only considers invoices that are both posted and paid.
         Queries Odoo in chunks of chunk_size using 'in' operator to stay well within parameter limits.
         """
         existing = set()
@@ -143,7 +146,11 @@ class OdooClient:
             f"Batch checking {len(unique_sequences)} tickets against Odoo in {total_chunks} chunk(s)..."
         )
 
-        domain_base = [("state", "=", "posted")] if only_posted else []
+        domain_base = []
+        if only_posted:
+            domain_base.append(("state", "=", "posted"))
+        if require_paid:
+            domain_base.append(("payment_state", "=", "paid"))
 
         for idx in range(0, len(unique_sequences), chunk_size):
             chunk = unique_sequences[idx : idx + chunk_size]
@@ -170,6 +177,56 @@ class OdooClient:
             f"Batch dedupe check complete: found {len(existing)} existing tickets in Odoo."
         )
         return existing
+
+    def get_existing_records_map(self, ticket_sequences, chunk_size=1000):
+        """
+        Batch query existing invoices in Odoo by ticket_sequence.
+        Returns a dict: ticket_sequence -> {'id': move_id, 'state': state, 'payment_state': payment_state}
+        In case of multiple records for the same ticket, prioritizes posted and paid records.
+        """
+        records_map = {}
+        clean_sequences = [
+            str(s).strip() for s in ticket_sequences if s and str(s).strip()
+        ]
+        unique_sequences = list(dict.fromkeys(clean_sequences))
+        if not unique_sequences:
+            return records_map
+
+        total_chunks = (len(unique_sequences) + chunk_size - 1) // chunk_size
+        fields = ["id", "ticket_sequence", "state", "payment_state"]
+
+        for idx in range(0, len(unique_sequences), chunk_size):
+            chunk = unique_sequences[idx : idx + chunk_size]
+            chunk_num = (idx // chunk_size) + 1
+            domain = [("ticket_sequence", "in", chunk)]
+            try:
+                records = self._execute(
+                    "account.move",
+                    "search_read",
+                    domain,
+                    fields,
+                )
+                for r in records:
+                    seq = str(r.get("ticket_sequence") or "").strip()
+                    if not seq:
+                        continue
+                    existing_entry = records_map.get(seq)
+                    if not existing_entry:
+                        records_map[seq] = r
+                    else:
+                        # Prioritize posted over draft/cancelled
+                        if r.get("state") == "posted" and existing_entry.get("state") != "posted":
+                            records_map[seq] = r
+                        # Prioritize paid over not_paid
+                        elif r.get("payment_state") == "paid" and existing_entry.get("payment_state") != "paid":
+                            records_map[seq] = r
+            except Exception as exc:
+                print(
+                    f"Error during batch records query (chunk {chunk_num}/{total_chunks}): {exc!r}"
+                )
+                raise
+
+        return records_map
 
     def already_posted(self, ticket_sequence):
         """Dedupe check: does an account.move with this ticket_sequence exist already in posted state?"""
@@ -226,13 +283,15 @@ class OdooClient:
         results = {"created": [], "skipped_duplicate": [], "failed": []}
 
         # 1. Fast Batch Query for all ticket sequences if not provided
+        existing_records_map = {}
         if existing_sequences_set is None:
             all_seqs = [
                 payload.get("ticket_sequence")
                 for _, payload in ticket_payloads
                 if isinstance(payload, dict) and payload.get("ticket_sequence")
             ]
-            existing_sequences_set = self.get_existing_ticket_sequences(all_seqs)
+            existing_records_map = self.get_existing_records_map(all_seqs)
+            existing_sequences_set = set(existing_records_map.keys())
         else:
             existing_sequences_set = set(existing_sequences_set)
 
@@ -246,8 +305,65 @@ class OdooClient:
                 continue
 
             try:
-                # Instant in-memory deduplication check (0.01ms)
+                # Deduplication & Auto-Heal for Existing Records
                 if ticket_sequence in existing_sequences_set:
+                    rec = existing_records_map.get(ticket_sequence)
+                    if rec:
+                        move_id = rec.get("id")
+                        move_state = rec.get("state")
+                        pay_state = rec.get("payment_state")
+
+                        # Case A: Invoice is posted but payment dropped/missing -> Auto-heal payment!
+                        if pay and move_state == "posted" and pay_state != "paid":
+                            try:
+                                self.register_payment(move_id, journal_id=payment_journal_id)
+                                entry = {
+                                    "ticket_sequence": ticket_sequence,
+                                    "move_id": move_id,
+                                    "posted": True,
+                                    "paid": True,
+                                    "healed": True,
+                                }
+                                results["created"].append(entry)
+                                rec["payment_state"] = "paid"
+                                continue
+                            except Exception as pay_exc:
+                                results["failed"].append(
+                                    {
+                                        "ticket_sequence": ticket_sequence,
+                                        "error": f"Failed to register payment on existing posted move {move_id}: {pay_exc}",
+                                    }
+                                )
+                                continue
+
+                        # Case B: Invoice exists in draft -> Auto-heal post and pay!
+                        elif move_state == "draft":
+                            try:
+                                if post:
+                                    self.action_post(move_id)
+                                    rec["state"] = "posted"
+                                if pay:
+                                    self.register_payment(move_id, journal_id=payment_journal_id)
+                                    rec["payment_state"] = "paid"
+                                entry = {
+                                    "ticket_sequence": ticket_sequence,
+                                    "move_id": move_id,
+                                    "posted": (rec.get("state") == "posted"),
+                                    "paid": (rec.get("payment_state") == "paid"),
+                                    "healed": True,
+                                }
+                                results["created"].append(entry)
+                                continue
+                            except Exception as draft_exc:
+                                results["failed"].append(
+                                    {
+                                        "ticket_sequence": ticket_sequence,
+                                        "error": f"Failed to post/pay draft move {move_id}: {draft_exc}",
+                                    }
+                                )
+                                continue
+
+                    # Case C: Fully posted & paid (or external duplicate set provided) -> Skip duplicate cleanly
                     results["skipped_duplicate"].append(ticket_sequence)
                     continue
 

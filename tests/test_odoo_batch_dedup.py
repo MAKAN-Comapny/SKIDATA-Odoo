@@ -146,6 +146,51 @@ class TestOdooBatchDeduplication(unittest.TestCase):
         self.assertEqual(results["created"], [])
         self.assertEqual(results["skipped_duplicate"], [])
 
+    @patch("odoo_client.xmlrpc.client.ServerProxy")
+    def test_process_batch_auto_heals_unpaid_posted_invoice(self, mock_proxy_cls):
+        """When an invoice is already posted in Odoo but not_paid, process_batch(pay=True)
+        must register payment on the existing move instead of skipping or recreating."""
+        mock_common = MagicMock()
+        mock_common.authenticate.return_value = 42
+        mock_models = MagicMock()
+
+        # Existing record in Odoo is posted, but not_paid!
+        mock_models.execute_kw.side_effect = [
+            # 1. get_existing_records_map
+            [
+                {
+                    "id": 1615224,
+                    "ticket_sequence": "seq_unpaid",
+                    "state": "posted",
+                    "payment_state": "not_paid",
+                }
+            ],
+            # 2. register_payment wizard create (active_ids: [1615224])
+            888,
+            # 3. action_create_payments
+            True,
+        ]
+        mock_proxy_cls.side_effect = lambda url: mock_common if "common" in url else mock_models
+
+        client = OdooClient()
+        payloads = [
+            ("seq_unpaid", {"ticket_sequence": "seq_unpaid", "amount": 40}),
+        ]
+
+        results = client.process_batch(
+            payloads, post=True, pay=True, payment_journal_id=99, pacing_delay=0
+        )
+
+        # Invoice should NOT be in skipped_duplicate or failed
+        self.assertEqual(results["skipped_duplicate"], [])
+        self.assertEqual(results["failed"], [])
+        # Invoice should be healed and marked created/paid
+        self.assertEqual(len(results["created"]), 1)
+        self.assertEqual(results["created"][0]["ticket_sequence"], "seq_unpaid")
+        self.assertEqual(results["created"][0]["move_id"], 1615224)
+        self.assertTrue(results["created"][0]["paid"])
+        self.assertTrue(results["created"][0]["healed"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -182,6 +182,23 @@ class TestOdooVerificationAndAutoHeal(unittest.TestCase):
         self.assertEqual(res["missing_tickets"], [])
         self.assertEqual(self.mock_client.get_existing_ticket_sequences.call_count, 0)
 
+    def test_verification_gate_passes_require_paid_flag(self):
+        """When pay=True, verify_and_auto_heal must require invoices to be both posted and paid."""
+        payloads = [("tkt_PAID_REQ", {"ticket_sequence": "tkt_PAID_REQ"})]
+        self.mock_client.get_existing_ticket_sequences.return_value = {"tkt_PAID_REQ"}
+
+        main_import.verify_and_auto_heal(
+            client=self.mock_client,
+            payloads=payloads,
+            post=True,
+            pay=True,
+        )
+
+        # Check call arguments to get_existing_ticket_sequences
+        self.mock_client.get_existing_ticket_sequences.assert_called_with(
+            ["tkt_PAID_REQ"], chunk_size=1000, only_posted=True, require_paid=True
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

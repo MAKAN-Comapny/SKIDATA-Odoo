@@ -63,7 +63,10 @@ def verify_and_auto_heal(
     print("=" * 64)
 
     # 1. Query Odoo for all expected ticket sequences in chunks of 1000
-    confirmed = client.get_existing_ticket_sequences(unique_expected, chunk_size=1000)
+    # When pay=True, verify both posted state and paid payment_state
+    confirmed = client.get_existing_ticket_sequences(
+        unique_expected, chunk_size=1000, only_posted=True, require_paid=pay
+    )
     missing = set(unique_expected) - confirmed
 
     if not missing:
@@ -108,8 +111,10 @@ def verify_and_auto_heal(
         )
         healed_records.extend(heal_results.get("created", []))
 
-        # Re-verify remaining missing tickets against live Odoo
-        reverified = client.get_existing_ticket_sequences(list(missing), chunk_size=1000)
+        # Re-verify remaining missing tickets against live Odoo (requiring paid if pay=True)
+        reverified = client.get_existing_ticket_sequences(
+            list(missing), chunk_size=1000, only_posted=True, require_paid=pay
+        )
         newly_healed = missing.intersection(reverified)
         missing = missing - reverified
 
