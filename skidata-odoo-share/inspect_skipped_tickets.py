@@ -84,12 +84,16 @@ def inspect_tickets():
         # Print detailed inspection of found records
         if target_records:
             for r_idx, rec in enumerate(target_records, start=1):
+                move_id = rec.get("id")
+                curr_state = rec.get("state")
+                curr_pay_state = rec.get("payment_state")
+
                 print(f"\n--- RECORD #{r_idx} DETAILS ---")
-                print(f"  Odoo Move ID       : {rec.get('id')}")
+                print(f"  Odoo Move ID       : {move_id}")
                 print(f"  Invoice Number     : {rec.get('name')}")
                 print(f"  Move Type          : {rec.get('move_type')}")
-                print(f"  State              : {rec.get('state')}")
-                print(f"  Payment State      : {rec.get('payment_state')}")
+                print(f"  State              : {curr_state}")
+                print(f"  Payment State      : {curr_pay_state}")
                 print(f"  Invoice/Bill Date  : {rec.get('invoice_date')}")
                 print(f"  Accounting Date    : {rec.get('date')}")
                 print(f"  Total Amount       : {rec.get('amount_total')}")
@@ -99,7 +103,29 @@ def inspect_tickets():
                 print(f"  Journal            : {rec.get('journal_id')}")
                 print(f"  Created Timestamp  : {rec.get('create_date')}")
                 print(f"  Last Modified      : {rec.get('write_date')}")
-                print(f"\nFull JSON:\n{json.dumps(rec, indent=2, default=str)}")
+
+                # ACTION: If posted but not paid, register payment immediately
+                if curr_state == "posted" and curr_pay_state != "paid":
+                    print(f"\n⚡ [REMEDIATION] Move ID {move_id} is posted but payment_state is '{curr_pay_state}'.")
+                    payment_journal_id = config.ODOO_PAYMENT_JOURNAL_ID
+                    print(f"  -> Calling client.register_payment(move_id={move_id}, journal_id={payment_journal_id})...")
+                    try:
+                        pay_res = client.register_payment(move_id, journal_id=payment_journal_id)
+                        print(f"  -> Payment wizard executed! Wizard Result: {pay_res}")
+                        # Re-verify state from live Odoo
+                        refreshed = client._execute(
+                            "account.move", "read", [move_id], ["id", "name", "state", "payment_state", "amount_total"]
+                        )
+                        if refreshed:
+                            updated = refreshed[0]
+                            print(f"  -> SUCCESS: Move ID {move_id} updated in Odoo:")
+                            print(f"     Invoice Name  : {updated.get('name')}")
+                            print(f"     State         : {updated.get('state')}")
+                            print(f"     Payment State : {updated.get('payment_state')} (VERIFIED PAID)")
+                    except Exception as pay_err:
+                        print(f"  ❌ Failed to register payment: {pay_err}")
+                elif curr_pay_state == "paid":
+                    print(f"\n✅ Move ID {move_id} is already marked PAID in Odoo. No action needed.")
         else:
             print(f"\n❌ ZERO RECORDS FOUND in Odoo for ticket sequence '{seq}'.")
 
